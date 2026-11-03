@@ -19,7 +19,7 @@ IMAGE="${IMAGE:-docker.io/ibrahimnd2000/flux-worker:v0.1.0}"
 # is excluded below; workers land on L40 / L40S / RTX 6000 Ada at the same price.
 GPU_ID="${GPU_ID:-NVIDIA L40S}"
 WORKERS_MIN="${WORKERS_MIN:-0}"     # scale to zero for the demo
-WORKERS_MAX="${WORKERS_MAX:-1}"
+WORKERS_MAX="${WORKERS_MAX:-2}"     # a throttled or pulling worker can hold a slot; 2 lets another host take the job
 IDLE_TIMEOUT="${IDLE_TIMEOUT:-60}"  # seconds a warm worker waits for the next job (billed)
 EXEC_TIMEOUT="${EXEC_TIMEOUT:-600}" # max seconds per job
 
