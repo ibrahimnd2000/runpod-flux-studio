@@ -63,3 +63,33 @@ The video worker image is 8 GB with no weights: Runpod model caching mounts the 
 `/runpod/model-store/huggingface/Lightricks/LTX-2.5-Diffusers/<revision>`, and the handler loads it from there
 (`OFFLOAD=model` keeps components on the GPU only while they run). Separate endpoint, separate 80 GB GPU pools,
 separate daily cap in the app.
+
+## Orchestration (pipelines, agents, battles)
+
+Runs execute inside the app pod (`app/src/lib/agents/`), not in the browser. The browser starts a run, gets an
+id, and polls `/api/runs/:id?after=<seq>` for new trace events; a run keeps going if the tab closes.
+
+```mermaid
+flowchart LR
+    UI[Pipelines · Agent · Battleground pages] -->|start| R[Run store<br/>memory + agent-runs.jsonl]
+    R --> P[Pipeline executor<br/>DAG, fan-out]
+    R --> AG[Agent loop]
+    AG -->|turn| L{LLM adapter}
+    L --> CL[Claude<br/>Anthropic SDK]
+    L --> VL[Qwen3-8B<br/>Runpod vLLM]
+    L --> SC[Scripted baseline]
+    AG -->|tool calls| T[Tools + budget check]
+    P --> T
+    T --> G[gpu.ts: same submit/poll code,<br/>limits and library as the Studio]
+    G --> IMG[[FLUX endpoint]]
+    G --> VID[[Wan / LTX endpoints]]
+    B[Battle] -->|2 agent runs| AG
+    B -->|deliveries + spend| J[Claude judge] --> E[Elo leaderboard<br/>battles.jsonl]
+```
+
+- **Budget per run:** dollars (GPU at measured or Runpod-reported cost, plus LLM tokens), images, clips, turns.
+  Tools check it before submitting; a refusal is a tool error the model reads.
+- **Same limits as the Studio:** agent image and video jobs go through the access code, per-visitor rate limit
+  and daily caps; at most 4 runs at once and 40 per day.
+- **Dry run:** GPU tools save placeholder media priced at the measured averages, so a whole flow (including the
+  LLM) can be demonstrated without any GPU.
