@@ -16,7 +16,9 @@ IMAGE="${IMAGE:-docker.io/ibrahimnd2000/flux-worker:v0.1.0}"
 # 48 GB: BF16 FLUX.1-dev fits without CPU offloading. Runpod resolves "NVIDIA L40S"
 # to its serverless pool ADA_48_PRO, which also contains an RTX PRO 6000 Blackwell
 # MIG slice (sm_120). The image's torch (cu126) has no sm_120 kernels, so that type
-# is excluded below; workers land on L40 / L40S / RTX 6000 Ada at the same price.
+# is excluded below. AMPERE_48 (A40 / RTX A6000, sm_86, cheaper per hour) is added
+# as a second pool because L40S supply is often low; Runpod places workers on
+# whichever listed pool has capacity.
 GPU_ID="${GPU_ID:-NVIDIA L40S}"
 WORKERS_MIN="${WORKERS_MIN:-0}"     # scale to zero for the demo
 WORKERS_MAX="${WORKERS_MAX:-2}"     # a throttled or pulling worker can hold a slot; 2 lets another host take the job
@@ -54,5 +56,5 @@ echo "endpoint: ${ENDPOINT_ID}"
 curl -sS -X PATCH "https://api.runpod.io/v2/serverless/${ENDPOINT_ID}" \
   -H "Authorization: Bearer ${RUNPOD_API_KEY}" \
   -H "Content-Type: application/json" \
-  -d '{"gpu":{"pools":["ADA_48_PRO"],"excludedTypes":["NVIDIA RTX PRO 6000 Blackwell Server Edition MIG 2g.48gb"]}}' \
+  -d '{"gpu":{"pools":["ADA_48_PRO","AMPERE_48"],"excludedTypes":["NVIDIA RTX PRO 6000 Blackwell Server Edition MIG 2g.48gb"]}}' \
   | python3 -c 'import json,sys; g=json.load(sys.stdin)["gpu"]; print("gpu pools:", g["pools"], "excluded:", g.get("excludedTypes"))'
