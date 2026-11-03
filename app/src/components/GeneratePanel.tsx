@@ -4,8 +4,11 @@ import { useEffect, useRef, useState } from "react";
 
 import { TERMINAL, type GenerateInput, type JobView } from "@/lib/types";
 
-import { getJson } from "./api";
+import { getJson, isTransient } from "./api";
 import JobDetails from "./JobDetails";
+import Notice from "./Notice";
+
+type Problem = { tone: "warn" | "error"; title: string; detail?: string };
 
 const PRESETS = [
   "A studio product photo of a ceramic coffee mug on a walnut table, soft morning light, shallow depth of field",
@@ -34,7 +37,7 @@ export default function GeneratePanel({ maxSide, maxSteps, onFinished }: {
   const [code, setCode] = useState("");
   const [job, setJob] = useState<JobView | null>(null);
   const [image, setImage] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [problem, setProblem] = useState<Problem | null>(null);
   const [busy, setBusy] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -52,30 +55,41 @@ export default function GeneratePanel({ maxSide, maxSteps, onFinished }: {
   }, []);
 
   async function poll(id: string, failures = 0) {
-    let res: Awaited<ReturnType<typeof getJson<JobView & { error?: string }>>>;
-    try {
-      res = await getJson<JobView & { error?: string }>(`/api/jobs/${id}`);
-    } catch {
-      res = { ok: false, status: 0, data: { error: "Network error. Retrying…" } as JobView & { error?: string } };
-    }
-    const view = res.data;
+    const res = await getJson<JobView>(`/api/jobs/${id}`);
     if (!res.ok) {
-      const transient = res.status === 0 || res.status >= 500;
-      if (transient && failures < MAX_POLL_FAILURES) {
-        setError(view.error ?? `HTTP ${res.status}. Retrying…`);
+      if (isTransient(res.status) && failures < MAX_POLL_FAILURES) {
+        setProblem({
+          tone: "warn",
+          title: "Lost contact with the app server, still trying",
+          detail: `${res.error} The job keeps running on Runpod. Attempt ${failures + 1}/${MAX_POLL_FAILURES}.`,
+        });
         timer.current = setTimeout(() => poll(id, failures + 1), 1000);
         return;
       }
-      setError(view.error ?? `HTTP ${res.status}`);
+      setProblem({
+        tone: "error",
+        title: res.status === 404 ? "This job is no longer tracked" : "Couldn't get the job status",
+        detail:
+          res.status === 404
+            ? "The app restarted while the job was running. The image may still have been generated on Runpod; try again."
+            : res.error,
+      });
       setBusy(false);
       return;
     }
-    setError(null);
+    const view = res.data;
+    setProblem(null);
     setJob(view);
     if (view.output?.image) setImage(view.output.image);
     if (TERMINAL.includes(view.status)) {
       setBusy(false);
-      if (view.error) setError(view.error);
+      if (view.status !== "COMPLETED" || view.error) {
+        setProblem({
+          tone: "error",
+          title: `The job ${view.status === "COMPLETED" ? "returned an error" : view.status.toLowerCase().replace("_", " ")}`,
+          detail: view.error ?? "No error message was returned.",
+        });
+      }
       onFinished();
     } else {
       timer.current = setTimeout(() => poll(id), 1000);
@@ -84,7 +98,7 @@ export default function GeneratePanel({ maxSide, maxSteps, onFinished }: {
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
-    setError(null);
+    setProblem(null);
     setImage(null);
     setJob(null);
     setBusy(true);
@@ -92,20 +106,25 @@ export default function GeneratePanel({ maxSide, maxSteps, onFinished }: {
       localStorage.setItem(CODE_KEY, code);
     } catch {}
     const body = { ...form, seed: seedText === "" ? undefined : Number(seedText) };
-    const res = await getJson<{ id: string; status: JobView["status"]; input: GenerateInput; error?: string }>(
-      "/api/generate",
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "x-access-code": code },
-        body: JSON.stringify(body),
-      },
-    ).catch(() => ({ ok: false, status: 0, data: { error: "Network error. Please try again." } as never }));
-    const data = res.data;
+    const res = await getJson<{ id: string; status: JobView["status"]; input: GenerateInput }>("/api/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-access-code": code },
+      body: JSON.stringify(body),
+    });
     if (!res.ok) {
-      setError(data.error ?? `HTTP ${res.status}`);
+      const title =
+        res.status === 401
+          ? "Access code not accepted"
+          : res.status === 429
+            ? "Limit reached"
+            : res.status === 400
+              ? "Check the request"
+              : "Couldn't start the job";
+      setProblem({ tone: "error", title, detail: res.error });
       setBusy(false);
       return;
     }
+    const data = res.data;
     setJob({ id: data.id, status: data.status, submittedAt: Date.now(), input: data.input });
     poll(data.id);
   }
@@ -194,7 +213,13 @@ export default function GeneratePanel({ maxSide, maxSteps, onFinished }: {
         </div>
       </form>
 
-      {error && <p className="mt-3 rounded-md bg-red-500/10 p-3 text-sm text-red-600 dark:text-red-400">{error}</p>}
+      {problem && (
+        <div className="mt-3">
+          <Notice tone={problem.tone} title={problem.title}>
+            {problem.detail}
+          </Notice>
+        </div>
+      )}
 
       {job && (
         <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">

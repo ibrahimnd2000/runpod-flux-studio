@@ -14,7 +14,7 @@ set -euo pipefail
 
 : "${RUNPOD_API_KEY:?set RUNPOD_API_KEY}"
 : "${RUNPOD_IMAGE_ENDPOINT_ID:?set RUNPOD_IMAGE_ENDPOINT_ID}"
-APP_IMAGE="${APP_IMAGE:-docker.io/ibrahimnd2000/flux-studio-app:v0.1.1}"
+APP_IMAGE="${APP_IMAGE:-docker.io/ibrahimnd2000/flux-studio-app:v0.1.2}"
 
 # runpodctl can't choose a CPU flavor/size, so this uses the REST v1 pods API.
 BODY=$(APP_IMAGE="$APP_IMAGE" python3 - <<'PY'

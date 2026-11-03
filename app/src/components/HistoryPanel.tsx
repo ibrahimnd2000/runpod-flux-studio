@@ -5,9 +5,18 @@ import { Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAx
 import type { HistoryView } from "@/lib/types";
 
 import { ago, secs, shortGpu, usd } from "./format";
+import Notice from "./Notice";
 
-export default function HistoryPanel({ h }: { h: HistoryView | null }) {
-  if (!h) return null;
+export default function HistoryPanel({ h, error }: { h: HistoryView | null; error: string | null }) {
+  if (!h)
+    return error ? (
+      <section className="card">
+        <h2 className="card-title">History</h2>
+        <Notice tone="warn" title="History isn't available right now">
+          {error} Retrying every 15 s.
+        </Notice>
+      </section>
+    ) : null;
   const s = h.stats;
   // Oldest first, warm and cold split so a 10-minute cold start doesn't flatten the chart.
   const chart = [...h.jobs]
@@ -24,6 +33,13 @@ export default function HistoryPanel({ h }: { h: HistoryView | null }) {
   return (
     <section className="card">
       <h2 className="card-title">History</h2>
+      {error && (
+        <div className="mb-4">
+          <Notice tone="warn" title="Showing the last loaded history">
+            Refresh failed ({error}); retrying every 15 s.
+          </Notice>
+        </div>
+      )}
       <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
         <Stat label="Warm execution p50 / p90" value={`${secs(s.warmExecP50Ms)} / ${secs(s.warmExecP90Ms)}`} />
         <Stat label="Cold start (delay) p50" value={secs(s.coldDelayP50Ms)} />

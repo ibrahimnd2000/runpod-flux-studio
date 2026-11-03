@@ -2,7 +2,8 @@
 
 import type { EndpointView } from "@/lib/types";
 
-import { secs, shortGpu } from "./format";
+import { ago, secs, shortGpu } from "./format";
+import Notice from "./Notice";
 
 const WORKER_STATES: { key: string; label: string; hint: string; tone: string }[] = [
   { key: "running", label: "Running", hint: "executing a job (billed)", tone: "bg-emerald-500" },
@@ -21,7 +22,18 @@ export default function EndpointPanel({ ep, error }: { ep: EndpointView | null; 
         <h2 className="card-title">Endpoint</h2>
         {ep && <span className="font-mono text-xs text-subtle">{ep.id}</span>}
       </div>
-      {error && <p className="text-sm text-red-600">{error}</p>}
+      {error && !ep && (
+        <Notice tone="error" title="Couldn't load the endpoint status">
+          {error} Retrying every 5 s.
+        </Notice>
+      )}
+      {error && ep && (
+        <div className="mb-4">
+          <Notice tone="warn" title="Showing the last known status">
+            Refresh failed ({error}). Data from {ago(ep.fetchedAt)}; retrying every 5 s.
+          </Notice>
+        </div>
+      )}
       {!ep && !error && <p className="text-sm text-subtle">Loading…</p>}
       {ep && (
         <div className="space-y-5 text-sm">

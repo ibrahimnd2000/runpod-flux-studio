@@ -13,22 +13,28 @@ export default function Dashboard() {
   const [ep, setEp] = useState<EndpointView | null>(null);
   const [epError, setEpError] = useState<string | null>(null);
   const [history, setHistory] = useState<HistoryView | null>(null);
+  const [historyError, setHistoryError] = useState<string | null>(null);
 
+  // On failure keep showing the last good data; the panels say it's stale and the
+  // next interval retries. Errors clear on the first success.
   const loadEndpoint = useCallback(async () => {
-    try {
-      const { ok, status, data } = await getJson<EndpointView & { error?: string }>("/api/endpoint");
-      if (!ok) throw new Error(data.error ?? `HTTP ${status}`);
-      setEp(data);
+    const res = await getJson<EndpointView>("/api/endpoint");
+    if (res.ok) {
+      setEp(res.data);
       setEpError(null);
-    } catch (e) {
-      setEpError((e as Error).message);
+    } else {
+      setEpError(res.error ?? "Unknown error");
     }
   }, []);
 
   const loadHistory = useCallback(async () => {
-    // Keep the last good history on transient failures; the next refresh retries.
-    const { ok, data } = await getJson<HistoryView>("/api/history").catch(() => ({ ok: false, data: null }));
-    if (ok && data) setHistory(data);
+    const res = await getJson<HistoryView>("/api/history");
+    if (res.ok) {
+      setHistory(res.data);
+      setHistoryError(null);
+    } else {
+      setHistoryError(res.error ?? "Unknown error");
+    }
   }, []);
 
   useEffect(() => {
@@ -56,7 +62,7 @@ export default function Dashboard() {
             loadEndpoint();
           }}
         />
-        <HistoryPanel h={history} />
+        <HistoryPanel h={history} error={historyError} />
       </div>
       <EndpointPanel ep={ep} error={epError} />
     </div>
