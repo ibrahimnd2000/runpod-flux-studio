@@ -60,10 +60,11 @@ if [[ -z "${ENDPOINT_ID:-}" ]]; then
 fi
 echo "endpoint: ${ENDPOINT_ID}"
 
-# A100 (AMPERE_80, $2.72/h) and H100 (ADA_80_PRO, $5.39/h): both run the cu126
-# image (sm_80 / sm_90); two pools improve availability.
+# A100 (AMPERE_80, $2.72/h), H100 (ADA_80_PRO, $5.39/h) and H200 (HOPPER_141, $6.99/h)
+# all run the cu126
+# image (sm_80 / sm_90); 80 GB supply is often low, so more pools = shorter queues.
 curl -sS -X PATCH "https://api.runpod.io/v2/serverless/${ENDPOINT_ID}" \
   -H "Authorization: Bearer ${RUNPOD_API_KEY}" \
   -H "Content-Type: application/json" \
-  -d '{"gpu":{"pools":["AMPERE_80","ADA_80_PRO"],"excludedTypes":[],"minCudaVersion":"12.6"}}' \
+  -d '{"gpu":{"pools":["AMPERE_80","ADA_80_PRO","HOPPER_141"],"excludedTypes":[],"minCudaVersion":"12.6"}}' \
   | python3 -c 'import json,sys; g=json.load(sys.stdin)["gpu"]; print("gpu pools:", g["pools"])'
