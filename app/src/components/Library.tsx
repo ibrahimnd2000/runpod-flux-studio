@@ -309,7 +309,7 @@ export default function Library() {
           </div>
         </div>
       )}
-      {animate && <AnimateDialog source={animate} onClose={closeAnimate} />}
+      {animate && <AnimateDialog source={animate} models={view?.videoModels ?? []} onClose={closeAnimate} />}
     </div>
   );
 }

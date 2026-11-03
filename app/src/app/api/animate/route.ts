@@ -1,3 +1,4 @@
+import { config } from "@/lib/config";
 import { checkVideoAccess, clientIp, LimitError, sanitizeAnimate } from "@/lib/limits";
 import { getMediaItem, readMedia } from "@/lib/media";
 import { submitVideoJob } from "@/lib/runpod";
@@ -15,7 +16,7 @@ export async function POST(req: Request) {
     const file = readMedia(input.sourceId);
     if (!source || !file || file.kind !== "image") throw new LimitError("That image isn't in the library any more.", 404);
 
-    const job = await submitVideoJob({
+    const job = await submitVideoJob(config.videoEndpoints[input.model!], {
       image: `data:${file.mime};base64,${file.bytes.toString("base64")}`,
       prompt: input.prompt,
       resolution: input.resolution,

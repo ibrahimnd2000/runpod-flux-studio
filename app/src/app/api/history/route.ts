@@ -1,6 +1,6 @@
 import { connection } from "next/server";
 
-import { config } from "@/lib/config";
+import { config, videoModels } from "@/lib/config";
 import { startOfUtcDay } from "@/lib/limits";
 import { pricesChecked } from "@/lib/prices";
 import { history, submittedSince } from "@/lib/store";
@@ -43,7 +43,8 @@ export async function GET() {
       maxSteps: config.maxSteps,
       bulkMax: config.bulkMax,
       perIpPer10Min: config.perIpPer10Min,
-      videoEnabled: !!config.videoEndpointId,
+      videoEnabled: videoModels().length > 0,
+      videoModels: videoModels(),
       videoDailyCap: config.videoDailyCap,
       videoUsedToday: videosSubmittedSince(startOfUtcDay()),
     },

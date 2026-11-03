@@ -1,5 +1,6 @@
 import "server-only";
 
+import { config } from "./config";
 import { saveMedia } from "./media";
 import { requestCost } from "./prices";
 import { videoJobStatus } from "./runpod";
@@ -28,7 +29,7 @@ export async function refreshVideoJob(id: string): Promise<VideoJobView | null> 
   const pending = getVideoPending(id);
   if (!pending) return null;
 
-  const s = await videoJobStatus(id);
+  const s = await videoJobStatus(config.videoEndpoints[pending.input.model ?? "ltx2"], id);
   const view: VideoJobView = {
     id,
     status: s.status,
@@ -57,7 +58,7 @@ export async function refreshVideoJob(id: string): Promise<VideoJobView | null> 
         sourceId: pending.input.sourceId,
         width: Number(out.params?.width ?? 0),
         height: Number(out.params?.height ?? 0),
-        steps: 8,
+        steps: Number(out.params?.steps ?? 8),
         seed: out.seed,
         gpu: out.worker?.gpu,
         executionMs: s.executionTime,

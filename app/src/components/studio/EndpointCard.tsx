@@ -3,6 +3,8 @@
 import { ChevronDown, Server } from "lucide-react";
 import { useState } from "react";
 
+import type { VideoModel } from "@/lib/types";
+
 import { ago, secs, shortGpu } from "../format";
 import Notice from "../Notice";
 import { endpointStatus, useEndpoint, usePolledEndpoint } from "../EndpointProvider";
@@ -24,17 +26,23 @@ const JOB_STATES = [
   ["failed", "Failed"],
 ] as const;
 
-export default function EndpointCard({ which = "image" }: { which?: "image" | "video" }) {
-  return which === "video" ? <VideoCard /> : <ImageCard />;
+export default function EndpointCard({
+  which = "image",
+  model = "wan22",
+}: {
+  which?: "image" | "video";
+  model?: VideoModel;
+}) {
+  return which === "video" ? <VideoCard model={model} /> : <ImageCard />;
 }
 
 function ImageCard() {
   return <Body title="Image GPU endpoint" {...useEndpoint()} />;
 }
 
-function VideoCard() {
-  const state = usePolledEndpoint("video", 10_000);
-  return <Body title="Video GPU endpoint · LTX-2.5" {...state} />;
+function VideoCard({ model }: { model: VideoModel }) {
+  const state = usePolledEndpoint(model === "ltx2" ? "video-ltx2" : "video-wan22", 10_000);
+  return <Body title={`Video GPU · ${model === "ltx2" ? "LTX-2.5" : "Wan 2.2"}`} {...state} />;
 }
 
 function Body({ title, ep, error }: { title: string } & ReturnType<typeof useEndpoint>) {

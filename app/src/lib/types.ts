@@ -101,6 +101,7 @@ export interface HistoryView {
     bulkMax: number;
     perIpPer10Min: number;
     videoEnabled: boolean;
+    videoModels: VideoModel[];
     videoDailyCap: number;
     videoUsedToday: number;
   };
@@ -132,12 +133,17 @@ export interface MediaView {
   items: MediaItem[];
   usage: { count: number; bytes: number; persistent: boolean };
   videoEnabled: boolean;
+  videoModels: VideoModel[];
 }
 
 // --------------------------------------------------------------------------- //
 //                                   Video                                     //
 // --------------------------------------------------------------------------- //
+export type VideoModel = "wan22" | "ltx2";
+
 export interface AnimateInput {
+  /** Missing on jobs from before Wan existed: those ran on LTX-2.5. */
+  model?: VideoModel;
   sourceId: string; // library image to animate
   prompt: string; // motion description
   resolution: "540p" | "720p";

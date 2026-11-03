@@ -4,7 +4,7 @@ import { Clapperboard, Download, Gamepad2, Images, Loader2, Volume2, VolumeX, X 
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { TERMINAL, type AnimateInput, type VideoJobView } from "@/lib/types";
+import { TERMINAL, type AnimateInput, type VideoJobView, type VideoModel } from "@/lib/types";
 
 import { getJson, isTransient } from "../api";
 import { secs, shortGpu, usd } from "../format";
@@ -30,6 +30,11 @@ const DURATIONS = [
 const POLL_MS = 3000;
 const MAX_POLL_FAILURES = 40;
 
+export const VIDEO_MODEL_LABELS: Record<VideoModel, { label: string; hint: string }> = {
+  wan22: { label: "Fast · Wan 2.2", hint: "48 GB GPUs, usually available; no sound" },
+  ltx2: { label: "Best · LTX-2.5", hint: "80 GB GPUs, can queue when supply is low; with sound" },
+};
+
 export interface AnimateSource {
   id: string; // library media id (the image job id)
   prompt: string;
@@ -37,7 +42,17 @@ export interface AnimateSource {
 }
 
 /** Modal: animate a library image with the LTX-2.5 endpoint and play the result. */
-export default function AnimateDialog({ source, onClose }: { source: AnimateSource; onClose: () => void }) {
+export default function AnimateDialog({
+  source,
+  models,
+  onClose,
+}: {
+  source: AnimateSource;
+  /** Video models this deployment offers, fastest first. */
+  models: VideoModel[];
+  onClose: () => void;
+}) {
+  const [model, setModel] = useState<VideoModel>(models[0] ?? "wan22");
   const [prompt, setPrompt] = useState(MOTION_PRESETS[0].prompt);
   const [resolution, setResolution] = useState<AnimateInput["resolution"]>("540p");
   const [frames, setFrames] = useState(49);
@@ -111,7 +126,7 @@ export default function AnimateDialog({ source, onClose }: { source: AnimateSour
     const res = await getJson<{ id: string; status: VideoJobView["status"]; input: AnimateInput }>("/api/animate", {
       method: "POST",
       headers: { "Content-Type": "application/json", "x-access-code": code },
-      body: JSON.stringify({ sourceId: source.id, prompt, resolution, num_frames: frames, audio }),
+      body: JSON.stringify({ model, sourceId: source.id, prompt, resolution, num_frames: frames, audio: audio && model === "ltx2" }),
     });
     setSubmitting(false);
     if (!res.ok) {
@@ -146,7 +161,7 @@ export default function AnimateDialog({ source, onClose }: { source: AnimateSour
         <header className="flex items-center gap-2 border-b border-border px-5 py-3.5">
           <Clapperboard className="h-4 w-4 text-accent" />
           <h2 className="text-sm font-semibold">
-            <Term term="animate">Animate with LTX-2.5</Term>
+            <Term term="animate">Animate</Term>
           </h2>
           <Button size="sm" variant="ghost" className="ml-auto" aria-label="Close" icon={<X className="h-4 w-4" />} onClick={onClose} />
         </header>
@@ -209,6 +224,18 @@ export default function AnimateDialog({ source, onClose }: { source: AnimateSour
                     </button>
                   ))}
                 </div>
+                {models.length > 1 && (
+                  <div className="space-y-1.5">
+                    <span className="block text-xs text-subtle"><Term term="videoModel">Model</Term></span>
+                    <Segmented
+                      label="Video model"
+                      value={model}
+                      onChange={setModel}
+                      options={models.map((m) => ({ value: m, label: VIDEO_MODEL_LABELS[m].label, title: VIDEO_MODEL_LABELS[m].hint }))}
+                    />
+                    <p className="text-[11px] text-subtle">{VIDEO_MODEL_LABELS[model].hint}</p>
+                  </div>
+                )}
                 <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
                   <div className="space-y-1.5">
                     <span className="block text-xs text-subtle"><Term term="duration">Length</Term></span>
@@ -222,8 +249,8 @@ export default function AnimateDialog({ source, onClose }: { source: AnimateSour
                     <span className="block text-xs text-subtle"><Term term="audio">Sound</Term></span>
                     <Segmented
                       label="Sound"
-                      value={audio ? "on" : "off"}
-                      onChange={(v) => setAudio(v === "on")}
+                      value={audio && model === "ltx2" ? "on" : "off"}
+                      onChange={(v) => model === "ltx2" && setAudio(v === "on")}
                       options={[
                         { value: "on", label: <><Volume2 className="h-3.5 w-3.5" /> On</> },
                         { value: "off", label: <><VolumeX className="h-3.5 w-3.5" /> Off</> },
@@ -238,8 +265,8 @@ export default function AnimateDialog({ source, onClose }: { source: AnimateSour
                   </Button>
                 </div>
                 <p className="text-xs text-subtle">
-                  Runs on a separate 80 GB GPU endpoint. The first clip after a quiet period includes a{" "}
-                  <Term term="videoColdStart">model load of several minutes</Term>.
+                  Runs on a separate video GPU endpoint. The first clip after a quiet period includes a{" "}
+                  <Term term="videoColdStart">model load</Term> that can take minutes.
                 </p>
               </form>
             ) : (
@@ -252,7 +279,7 @@ export default function AnimateDialog({ source, onClose }: { source: AnimateSour
                 </div>
                 {running && job.status === "IN_QUEUE" && elapsed > 20_000 && (
                   <Notice tone="warn" title="Starting a video GPU">
-                    No warm video worker: Runpod is bringing one up and loading the 72 GB model. This can take several
+                    No warm video worker: Runpod is bringing one up and loading the model. This can take several
                     minutes; you can keep this open or close it and find the clip in the library later.
                   </Notice>
                 )}

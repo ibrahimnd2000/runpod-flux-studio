@@ -1,5 +1,7 @@
 import "server-only";
 
+import type { VideoModel } from "./types";
+
 // Server-side configuration. None of these are NEXT_PUBLIC_, so they never reach
 // the browser bundle. On Runpod, RUNPOD_API_KEY and DEMO_ACCESS_CODE come from
 // Runpod Secrets ({{ RUNPOD_SECRET_... }} in the pod's environment).
@@ -20,8 +22,11 @@ export const config = {
   bulkMax: int("BULK_MAX", 8),
   maxSide: int("MAX_SIDE", 1024),
   maxSteps: int("MAX_STEPS", 28),
-  // Image-to-video (LTX-2.5) endpoint; empty = the Animate feature is hidden.
-  videoEndpointId: process.env.RUNPOD_VIDEO_ENDPOINT_ID ?? "",
+  // Image-to-video endpoints, one per model family; none set = Animate is hidden.
+  videoEndpoints: {
+    wan22: process.env.RUNPOD_WAN_ENDPOINT_ID ?? "", // Wan 2.2 TI2V-5B: 48 GB GPUs, no audio
+    ltx2: process.env.RUNPOD_VIDEO_ENDPOINT_ID ?? "", // LTX-2.5: 80 GB GPUs, with audio
+  } as Record<VideoModel, string>,
   // A clip costs ~10x an image, so videos get their own, smaller daily cap.
   videoDailyCap: int("VIDEO_DAILY_CAP", 20),
   videoMaxFrames: int("VIDEO_MAX_FRAMES", 121),
@@ -34,3 +39,7 @@ export function requireRunpod() {
     throw new Error("RUNPOD_API_KEY and RUNPOD_IMAGE_ENDPOINT_ID must be set on the server");
   }
 }
+
+/** Video models this deployment can run, fastest first. */
+export const videoModels = (): VideoModel[] =>
+  (["wan22", "ltx2"] as const).filter((m) => !!config.videoEndpoints[m]);

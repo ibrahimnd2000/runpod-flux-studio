@@ -79,15 +79,15 @@ export interface VideoJobInput {
   seed?: number;
 }
 
-export function submitVideoJob(input: VideoJobInput) {
-  return call<{ id: string; status: JobStatus }>(`${JOBS_API}/${config.videoEndpointId}/run`, {
+export function submitVideoJob(endpointId: string, input: VideoJobInput) {
+  return call<{ id: string; status: JobStatus }>(`${JOBS_API}/${endpointId}/run`, {
     method: "POST",
     body: JSON.stringify({ input }),
   });
 }
 
-export function videoJobStatus(id: string) {
-  return call<RunpodStatus>(`${JOBS_API}/${config.videoEndpointId}/status/${encodeURIComponent(id)}`);
+export function videoJobStatus(endpointId: string, id: string) {
+  return call<RunpodStatus>(`${JOBS_API}/${endpointId}/status/${encodeURIComponent(id)}`);
 }
 
 export interface GpuCatalogEntry {

@@ -20,11 +20,12 @@ async function membersByPool() {
   return poolMembers;
 }
 
-// ?which=video reads the LTX-2.5 endpoint instead of the image endpoint.
+// ?which=video&model=wan22|ltx2 reads a video endpoint instead of the image endpoint.
 export async function GET(req: Request) {
   await connection(); // live data: never prerender at build time
-  const video = new URL(req.url).searchParams.get("which") === "video";
-  const endpointId = video ? config.videoEndpointId : config.endpointId;
+  const q = new URL(req.url).searchParams;
+  const model = q.get("model") === "ltx2" ? "ltx2" : "wan22";
+  const endpointId = q.get("which") === "video" ? config.videoEndpoints[model] : config.endpointId;
   if (!endpointId) return Response.json({ error: "No video endpoint configured." }, { status: 404 });
   const hit = cache.get(endpointId);
   if (hit && Date.now() - hit.at < 4000) return Response.json(hit.view);

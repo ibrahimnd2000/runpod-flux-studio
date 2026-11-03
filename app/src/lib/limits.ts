@@ -2,7 +2,7 @@ import "server-only";
 
 import { timingSafeEqual } from "node:crypto";
 
-import { config } from "./config";
+import { config, videoModels } from "./config";
 import { submittedByIpSince, submittedSince } from "./store";
 import type { AnimateInput, GenerateInput } from "./types";
 import { videosSubmittedSince } from "./videoStore";
@@ -61,7 +61,7 @@ export function checkAccess(code: string | null, ip: string, count = 1) {
 
 /** Video: access code, its own daily cap (clips cost ~10x an image) and the shared per-visitor rate limit. */
 export function checkVideoAccess(code: string | null, ip: string) {
-  if (!config.videoEndpointId) throw new LimitError("Video generation isn't enabled on this deployment.", 503);
+  if (!videoModels().length) throw new LimitError("Video generation isn't enabled on this deployment.", 503);
   checkCode(code);
   const used = videosSubmittedSince(startOfUtcDay());
   if (used >= config.videoDailyCap)
@@ -99,7 +99,10 @@ export function sanitizeAnimate(body: Record<string, unknown>): AnimateInput {
   const prompt = typeof body.prompt === "string" ? body.prompt.trim().slice(0, 1000) : "";
   if (!prompt) throw new LimitError("Describe the motion, e.g. 'slow camera push-in, steam rising'.", 400);
   const frames = clamp(body.num_frames, 9, config.videoMaxFrames, 121);
+  const available = videoModels();
+  const model = available.includes(body.model as never) ? (body.model as AnimateInput["model"]) : available[0];
   const input: AnimateInput = {
+    model,
     sourceId,
     prompt,
     resolution: body.resolution === "720p" ? "720p" : "540p",

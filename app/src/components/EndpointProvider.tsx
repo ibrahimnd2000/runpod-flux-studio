@@ -17,7 +17,10 @@ const Ctx = createContext<EndpointState>({ ep: null, error: null, refresh: () =>
 const POLL_MS = 5000;
 
 /** Polls one endpoint's /api/endpoint view, keeping the last good data on failures. */
-export function usePolledEndpoint(which: "image" | "video", intervalMs: number): EndpointState {
+export function usePolledEndpoint(
+  which: "image" | "video-wan22" | "video-ltx2",
+  intervalMs: number,
+): EndpointState {
   const [ep, setEp] = useState<EndpointView | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [tick, setTick] = useState(0);
@@ -25,7 +28,8 @@ export function usePolledEndpoint(which: "image" | "video", intervalMs: number):
   useEffect(() => {
     let cancelled = false;
     const load = async () => {
-      const res = await getJson<EndpointView>(which === "video" ? "/api/endpoint?which=video" : "/api/endpoint");
+      const url = which === "image" ? "/api/endpoint" : `/api/endpoint?which=video&model=${which.slice(6)}`;
+      const res = await getJson<EndpointView>(url);
       if (cancelled) return;
       if (res.ok) {
         setEp(res.data);

@@ -153,10 +153,10 @@ export default function Studio() {
         </div>
         <div className="space-y-6 xl:sticky xl:top-6 xl:self-start">
           <EndpointCard />
-          {limits?.videoEnabled && <EndpointCard which="video" />}
+          {limits?.videoModels?.map((m) => <EndpointCard key={m} which="video" model={m} />)}
         </div>
       </div>
-      {animate && <AnimateDialog source={animate} onClose={closeAnimate} />}
+      {animate && <AnimateDialog source={animate} models={limits?.videoModels ?? []} onClose={closeAnimate} />}
     </div>
   );
 }

@@ -1,6 +1,6 @@
 import { connection } from "next/server";
 
-import { config } from "@/lib/config";
+import { videoModels } from "@/lib/config";
 import { listMedia, mediaUsage } from "@/lib/media";
 import { syncPendingVideos } from "@/lib/videoJobs";
 import type { MediaView } from "@/lib/types";
@@ -11,6 +11,7 @@ export async function GET() {
   return Response.json({
     items: listMedia(),
     usage: mediaUsage(),
-    videoEnabled: !!config.videoEndpointId,
+    videoEnabled: videoModels().length > 0,
+    videoModels: videoModels(),
   } satisfies MediaView);
 }
