@@ -44,7 +44,7 @@ curl -s -X POST $EP/runsync -H "$AUTH" -H 'Content-Type: application/json' -d '{
 ## Through the hosted demo app (no Runpod key, needs the access code)
 
 ```bash
-APP=https://20y8q5cu3y7at9-3000.proxy.runpod.net
+APP=https://t2jragqmgaorlq-3000.proxy.runpod.net
 curl -s -X POST $APP/api/generate -H 'Content-Type: application/json' -H "x-access-code: $CODE" \
   -d '{"prompt":"A glass bottle of olive oil beside rosemary on linen","width":1024,"height":1024}'
 # {"id":"<job id>",...}  then poll:  curl -s $APP/api/jobs/<job id>

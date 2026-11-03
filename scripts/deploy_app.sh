@@ -18,7 +18,7 @@ set -euo pipefail
 : "${RUNPOD_IMAGE_ENDPOINT_ID:?set RUNPOD_IMAGE_ENDPOINT_ID}"
 : "${NETWORK_VOLUME_ID:?set NETWORK_VOLUME_ID (job history lives on it)}"
 : "${DATA_CENTER_ID:?set DATA_CENTER_ID (data center of the network volume)}"
-APP_IMAGE="${APP_IMAGE:-docker.io/ibrahimnd2000/flux-studio-app:v0.2.0}"
+APP_IMAGE="${APP_IMAGE:-docker.io/ibrahimnd2000/flux-studio-app:v0.2.1}"
 
 # runpodctl can't choose a CPU flavor/size, so this uses the REST v1 pods API.
 BODY=$(APP_IMAGE="$APP_IMAGE" NETWORK_VOLUME_ID="$NETWORK_VOLUME_ID" DATA_CENTER_ID="$DATA_CENTER_ID" python3 - <<'PY'

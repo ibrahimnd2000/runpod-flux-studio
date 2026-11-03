@@ -3,7 +3,7 @@
 Text → product image with **FLUX.1-dev** on a **Runpod Serverless** GPU endpoint, plus a small web app that
 shows, for every request, where the time and money went (queue, cold start, GPU time, cost per image).
 
-**Live demo:** https://20y8q5cu3y7at9-3000.proxy.runpod.net (generating needs the access code sent with the submission)
+**Live demo:** https://t2jragqmgaorlq-3000.proxy.runpod.net (generating needs the access code sent with the submission)
 
 ![Studio: composer, result with request inspector, live endpoint card](docs/screenshots/studio.png)
 
@@ -64,12 +64,12 @@ The whole build, all tests and benchmarks cost **under $1** of GPU time.
 ## Quick start
 
 ### 1. Try the hosted app (no setup)
-Open the [live demo](https://20y8q5cu3y7at9-3000.proxy.runpod.net), enter the access code, press
+Open the [live demo](https://t2jragqmgaorlq-3000.proxy.runpod.net), enter the access code, press
 **Generate**. Hover any ⓘ for a plain-language explanation; *How it works* explains every number.
 
 The same app API works from a terminal without a Runpod key:
 ```bash
-curl -s -X POST https://20y8q5cu3y7at9-3000.proxy.runpod.net/api/generate \
+curl -s -X POST https://t2jragqmgaorlq-3000.proxy.runpod.net/api/generate \
   -H 'Content-Type: application/json' -H "x-access-code: $CODE" \
   -d '{"prompt":"White running shoes on a concrete plinth","width":1024,"height":1024}'
 # → {"id": "..."}; poll GET /api/jobs/<id> until "status": "COMPLETED"
