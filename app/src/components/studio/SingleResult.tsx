@@ -1,11 +1,12 @@
 "use client";
 
-import { Clapperboard, Copy, Download, Images, Loader2, RotateCcw, Sparkles } from "lucide-react";
+import { Clapperboard, Copy, Download, Gamepad2, Images, Loader2, RotateCcw, Sparkles } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 
 import type { JobView } from "@/lib/types";
 
+import WaitingGame from "../fun/WaitingGame";
 import { secs, shortGpu, usd } from "../format";
 import Notice from "../Notice";
 import { Badge, Button, buttonClass, EmptyState } from "../ui/primitives";
@@ -35,6 +36,8 @@ export default function SingleResult({
 }) {
   const toast = useToast();
   const [now, setNow] = useState(0);
+  // The game stays open after the image arrives until the player chooses to look.
+  const [gameFor, setGameFor] = useState<string | null>(null);
   const running = !!job && !["COMPLETED", "FAILED", "CANCELLED", "TIMED_OUT"].includes(job.status);
   useEffect(() => {
     if (!running) return;
@@ -56,6 +59,15 @@ export default function SingleResult({
     );
 
   const elapsed = job.clientWallMs ?? Math.max(now - job.submittedAt, 0);
+  const gameOpen = gameFor === job.id;
+  const statusLine =
+    job.status === "IN_PROGRESS" && job.progress
+      ? `Generating · step ${job.progress.step}/${job.progress.total_steps}`
+      : job.status === "IN_QUEUE"
+        ? `Waiting for a GPU · ${secs(elapsed, 0)}`
+        : job.status === "COMPLETED"
+          ? "Image ready"
+          : job.status.toLowerCase();
   const stage = STAGES.findIndex((s) => s.key === job.status);
   const ratio = job.input.width / job.input.height;
   const progress = job.progress ? job.progress.step / job.progress.total_steps : 0;
@@ -69,7 +81,16 @@ export default function SingleResult({
             className="relative mx-auto max-h-[70vh] overflow-hidden rounded-xl border border-border bg-muted"
             style={{ aspectRatio: ratio }}
           >
-            {image ? (
+            {gameOpen ? (
+              <div className="absolute inset-0 bg-card">
+                <WaitingGame
+                  statusLine={statusLine}
+                  paused={!running}
+                  onDone={!running ? () => setGameFor(null) : undefined}
+                  doneLabel={job.status === "COMPLETED" ? "Your image is ready" : "The job finished"}
+                />
+              </div>
+            ) : image ? (
               // eslint-disable-next-line @next/next/no-img-element
               <img src={image} alt={job.input.prompt} className="h-full w-full object-contain" />
             ) : (
@@ -88,6 +109,15 @@ export default function SingleResult({
                     No warm worker yet: Runpod is starting one (<Term term="coldStart">cold start</Term>). Usually under a
                     minute; longer if a new host has to download the image.
                   </span>
+                )}
+                {running && (
+                  <button
+                    type="button"
+                    onClick={() => setGameFor(job.id)}
+                    className="relative mt-1 inline-flex items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1 text-xs text-foreground hover:border-accent hover:text-accent"
+                  >
+                    <Gamepad2 className="h-3.5 w-3.5" /> Play while you wait
+                  </button>
                 )}
               </div>
             )}

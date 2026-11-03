@@ -10,6 +10,38 @@ export type Problem = { tone: "warn" | "error"; title: string; detail?: string }
 
 // Keep polling through short outages (pod restart, proxy hiccup) for about a minute.
 const MAX_POLL_FAILURES = 60;
+const ACTIVE_JOB_KEY = "flux-studio-active-job";
+const BASE_TITLE = "Studio · FLUX Studio";
+
+/** 1 s while things move; 3 s once a job has sat in the queue for 30 s (cold starts). */
+const pollDelay = (view: JobView) =>
+  view.status === "IN_QUEUE" && Date.now() - view.submittedAt > 30_000 ? 3000 : 1000;
+
+function setTitle(view: JobView | null) {
+  if (typeof document === "undefined") return;
+  if (!view) document.title = BASE_TITLE;
+  else if (view.status === "IN_PROGRESS" && view.progress)
+    document.title = `[${view.progress.step}/${view.progress.total_steps}] Generating · FLUX Studio`;
+  else if (view.status === "IN_QUEUE") document.title = "Waiting for a GPU… · FLUX Studio";
+  else if (view.status === "COMPLETED" && !view.error) document.title = "✓ Image ready · FLUX Studio";
+  else document.title = "Job failed · FLUX Studio";
+}
+
+const session = {
+  get: () => {
+    try {
+      return sessionStorage.getItem(ACTIVE_JOB_KEY);
+    } catch {
+      return null;
+    }
+  },
+  set: (id: string | null) => {
+    try {
+      if (id) sessionStorage.setItem(ACTIVE_JOB_KEY, id);
+      else sessionStorage.removeItem(ACTIVE_JOB_KEY);
+    } catch {}
+  },
+};
 
 function submitProblem(status: number, error?: string): Problem {
   const title =
@@ -34,6 +66,7 @@ export function useSingleJob(onFinished: (job: JobView) => void) {
   useEffect(
     () => () => {
       if (timer.current) clearTimeout(timer.current);
+      setTitle(null);
     },
     [],
   );
@@ -51,6 +84,8 @@ export function useSingleJob(onFinished: (job: JobView) => void) {
           timer.current = setTimeout(() => poll(id, failures + 1), 1000);
           return;
         }
+        session.set(null);
+        setTitle(null);
         setProblem({
           tone: "error",
           title: res.status === 404 ? "This job is no longer tracked" : "Couldn't get the job status",
@@ -65,8 +100,10 @@ export function useSingleJob(onFinished: (job: JobView) => void) {
       const view = res.data;
       setProblem(null);
       setJob(view);
+      setTitle(view);
       if (view.output?.image) setImage(view.output.image);
       if (TERMINAL.includes(view.status)) {
+        session.set(null);
         setBusy(false);
         if (view.status !== "COMPLETED" || view.error) {
           setProblem({
@@ -77,7 +114,7 @@ export function useSingleJob(onFinished: (job: JobView) => void) {
         }
         onFinished(view);
       } else {
-        timer.current = setTimeout(() => poll(id), 1000);
+        timer.current = setTimeout(() => poll(id), pollDelay(view));
       }
     },
     [onFinished],
@@ -100,11 +137,25 @@ export function useSingleJob(onFinished: (job: JobView) => void) {
         setBusy(false);
         return;
       }
-      setJob({ id: res.data.id, status: res.data.status, submittedAt: Date.now(), input: res.data.input });
-      poll(res.data.id);
+      const view: JobView = { id: res.data.id, status: res.data.status, submittedAt: Date.now(), input: res.data.input };
+      setJob(view);
+      setTitle(view);
+      session.set(view.id);
+      poll(view.id);
     },
     [poll],
   );
+
+  // A reload mid-generation picks the job back up (finished jobs come back from history).
+  useEffect(() => {
+    const id = session.get();
+    if (!id) return;
+    const t = setTimeout(() => {
+      setBusy(true);
+      poll(id);
+    }, 0);
+    return () => clearTimeout(t);
+  }, [poll]);
 
   return { job, image, problem, busy, submit };
 }

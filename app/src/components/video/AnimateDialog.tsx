@@ -1,6 +1,6 @@
 "use client";
 
-import { Clapperboard, Download, Images, Loader2, Volume2, VolumeX, X } from "lucide-react";
+import { Clapperboard, Download, Gamepad2, Images, Loader2, Volume2, VolumeX, X } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 
@@ -8,6 +8,7 @@ import { TERMINAL, type AnimateInput, type VideoJobView } from "@/lib/types";
 
 import { getJson, isTransient } from "../api";
 import { secs, shortGpu, usd } from "../format";
+import WaitingGame from "../fun/WaitingGame";
 import Notice from "../Notice";
 import { Badge, Button, buttonClass, Segmented } from "../ui/primitives";
 import { useToast } from "../ui/Toaster";
@@ -46,6 +47,7 @@ export default function AnimateDialog({ source, onClose }: { source: AnimateSour
   const [problem, setProblem] = useState<{ tone: "warn" | "error"; title: string; detail?: string } | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [now, setNow] = useState(0);
+  const [playing, setPlaying] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const toast = useToast();
 
@@ -153,18 +155,38 @@ export default function AnimateDialog({ source, onClose }: { source: AnimateSour
           {/* Source frame, or the clip once it's ready */}
           <div className="space-y-2">
             <div className="relative overflow-hidden rounded-xl border border-border bg-muted">
-              {done ? (
+              {playing && job ? (
+                <WaitingGame
+                  statusLine={
+                    job.status === "IN_PROGRESS" && job.progress
+                      ? `Generating · step ${job.progress.step}/${job.progress.total_steps}`
+                      : running
+                        ? `Waiting for a video GPU · ${secs(elapsed, 0)}`
+                        : "Clip ready"
+                  }
+                  paused={!running}
+                  onDone={!running ? () => setPlaying(false) : undefined}
+                  doneLabel={done ? "Your clip is ready" : "The video job finished"}
+                />
+              ) : done ? (
                 <video src={job.output!.url} controls autoPlay loop playsInline className="w-full" />
               ) : (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img src={source.url} alt={source.prompt} className={`w-full ${running ? "opacity-60" : ""}`} />
               )}
-              {running && (
+              {running && !playing && (
                 <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-sm text-white">
                   <Loader2 className="h-6 w-6 animate-spin" />
                   {job.status === "IN_PROGRESS" && job.progress
                     ? `Step ${job.progress.step} of ${job.progress.total_steps}`
                     : "Waiting for a video GPU…"}
+                  <button
+                    type="button"
+                    onClick={() => setPlaying(true)}
+                    className="mt-1 inline-flex items-center gap-1.5 rounded-full bg-black/50 px-3 py-1 text-xs hover:bg-black/70"
+                  >
+                    <Gamepad2 className="h-3.5 w-3.5" /> Play while you wait
+                  </button>
                 </div>
               )}
             </div>

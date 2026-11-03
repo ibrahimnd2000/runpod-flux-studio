@@ -3,8 +3,11 @@
 import { BookOpen, Images, Sparkles } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useRef } from "react";
 
+import EasterEggs, { HAIKUS } from "./fun/EasterEggs";
 import { endpointStatus, useEndpoint } from "./EndpointProvider";
+import { useToast } from "./ui/Toaster";
 import { Tooltip } from "./ui/Tooltip";
 
 const NAV = [
@@ -16,8 +19,19 @@ const NAV = [
 const DOT = { green: "bg-emerald-500", amber: "bg-amber-500", red: "bg-red-500", blue: "bg-sky-500", neutral: "bg-zinc-400" };
 
 function Logo() {
+  // Five quick clicks on the logo: a cold-start haiku.
+  const toast = useToast();
+  const clicks = useRef<number[]>([]);
+  const onClick = () => {
+    const now = Date.now();
+    clicks.current = [...clicks.current.filter((t) => now - t < 2000), now];
+    if (clicks.current.length >= 5) {
+      clicks.current = [];
+      toast("success", HAIKUS[Math.floor(Math.random() * HAIKUS.length)]);
+    }
+  };
   return (
-    <Link href="/" className="flex items-center gap-2.5 font-semibold tracking-tight">
+    <Link href="/" onClick={onClick} className="flex items-center gap-2.5 font-semibold tracking-tight">
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img src="/icon.svg" alt="" className="h-7 w-7" />
       <span>
@@ -110,6 +124,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         </header>
         <main className="mx-auto w-full max-w-[1400px] flex-1 px-4 py-6 sm:px-6 lg:px-8">{children}</main>
       </div>
+      <EasterEggs />
     </div>
   );
 }

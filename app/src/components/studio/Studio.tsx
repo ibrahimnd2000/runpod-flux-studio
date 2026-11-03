@@ -7,6 +7,7 @@ import type { HistoryView, JobView } from "@/lib/types";
 import { getJson } from "../api";
 import { useEndpoint } from "../EndpointProvider";
 import { Card } from "../ui/primitives";
+import { celebrate } from "../fun/EasterEggs";
 import { useToast } from "../ui/Toaster";
 import { useAccessCode } from "../useAccessCode";
 import BulkResults from "./BulkResults";
@@ -53,7 +54,14 @@ export default function Studio() {
   const onSingleFinished = useCallback(
     (job: JobView) => {
       onFinished();
-      if (job.status === "COMPLETED" && !job.error) toast("success", "Image ready · saved to the library");
+      if (job.status === "COMPLETED" && !job.error) {
+        if (job.output?.seed === 42) {
+          toast("success", "Seed 42: the answer to life, the universe and product photography.");
+          celebrate();
+        } else {
+          toast("success", "Image ready · saved to the library");
+        }
+      }
     },
     [onFinished, toast],
   );
