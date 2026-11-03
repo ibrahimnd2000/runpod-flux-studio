@@ -59,8 +59,13 @@ export function finish(record: JobRecord) {
   store.done.set(record.id, record);
   while (store.done.size > MAX_JOBS) store.done.delete(store.done.keys().next().value!);
   if (file) {
-    mkdirSync(config.dataDir, { recursive: true });
-    appendFileSync(file, JSON.stringify(record) + "\n");
+    try {
+      mkdirSync(config.dataDir, { recursive: true });
+      appendFileSync(file, JSON.stringify(record) + "\n");
+    } catch (e) {
+      // History still works in memory; losing persistence must not fail the request.
+      console.error(`could not persist job history to ${file}`, e);
+    }
   }
 }
 
