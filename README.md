@@ -108,7 +108,16 @@ MOCK_PIPELINE=1 ../../.venv/bin/python handler.py --rp_serve_api --rp_api_port 8
 `MOCK_PIPELINE=1` swaps FLUX for a deterministic image generator, so validation, errors and the response shape
 are testable on a laptop. The video worker works the same way (`cd workers/video && MOCK_PIPELINE=1 ...`).
 
-### 4. Build and deploy your own
+### 4. Run the web app locally
+```bash
+cd app && npm ci
+set -a; source ../.env; set +a                 # RUNPOD_API_KEY + endpoint ids (server-side only)
+DEMO_ACCESS_CODE=pick-one npm run build && DEMO_ACCESS_CODE=pick-one npm start   # http://localhost:3000
+```
+Without `DEMO_ACCESS_CODE` the dashboards work but generating is disabled (fail closed). Without
+`RUNPOD_VIDEO_ENDPOINT_ID` the Animate button is hidden.
+
+### 5. Build and deploy your own
 ```bash
 hf auth login                                   # account that accepted the FLUX.1-dev licence
 REGISTRY_USER=<you> IMAGE_TAG=v0.2.0 scripts/build_and_push.sh    # linux/amd64, HF token as a BuildKit secret
