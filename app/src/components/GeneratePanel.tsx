@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { TERMINAL, type GenerateInput, type JobView } from "@/lib/types";
 
+import { getJson } from "./api";
 import JobDetails from "./JobDetails";
 
 const PRESETS = [
@@ -14,6 +15,8 @@ const PRESETS = [
 ];
 
 const CODE_KEY = "flux-demo-access-code";
+// Keep polling through short outages (pod restart, proxy hiccup) for about a minute.
+const MAX_POLL_FAILURES = 60;
 
 export default function GeneratePanel({ maxSide, maxSteps, onFinished }: {
   maxSide: number;
@@ -48,14 +51,26 @@ export default function GeneratePanel({ maxSide, maxSteps, onFinished }: {
     };
   }, []);
 
-  async function poll(id: string) {
-    const res = await fetch(`/api/jobs/${id}`, { cache: "no-store" });
-    const view = (await res.json()) as JobView & { error?: string };
+  async function poll(id: string, failures = 0) {
+    let res: Awaited<ReturnType<typeof getJson<JobView & { error?: string }>>>;
+    try {
+      res = await getJson<JobView & { error?: string }>(`/api/jobs/${id}`);
+    } catch {
+      res = { ok: false, status: 0, data: { error: "Network error. Retrying…" } as JobView & { error?: string } };
+    }
+    const view = res.data;
     if (!res.ok) {
+      const transient = res.status === 0 || res.status >= 500;
+      if (transient && failures < MAX_POLL_FAILURES) {
+        setError(view.error ?? `HTTP ${res.status}. Retrying…`);
+        timer.current = setTimeout(() => poll(id, failures + 1), 1000);
+        return;
+      }
       setError(view.error ?? `HTTP ${res.status}`);
       setBusy(false);
       return;
     }
+    setError(null);
     setJob(view);
     if (view.output?.image) setImage(view.output.image);
     if (TERMINAL.includes(view.status)) {
@@ -77,12 +92,15 @@ export default function GeneratePanel({ maxSide, maxSteps, onFinished }: {
       localStorage.setItem(CODE_KEY, code);
     } catch {}
     const body = { ...form, seed: seedText === "" ? undefined : Number(seedText) };
-    const res = await fetch("/api/generate", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "x-access-code": code },
-      body: JSON.stringify(body),
-    });
-    const data = await res.json();
+    const res = await getJson<{ id: string; status: JobView["status"]; input: GenerateInput; error?: string }>(
+      "/api/generate",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-access-code": code },
+        body: JSON.stringify(body),
+      },
+    ).catch(() => ({ ok: false, status: 0, data: { error: "Network error. Please try again." } as never }));
+    const data = res.data;
     if (!res.ok) {
       setError(data.error ?? `HTTP ${res.status}`);
       setBusy(false);

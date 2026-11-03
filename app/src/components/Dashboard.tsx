@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 
 import type { EndpointView, HistoryView } from "@/lib/types";
 
+import { getJson } from "./api";
 import EndpointPanel from "./EndpointPanel";
 import GeneratePanel from "./GeneratePanel";
 import HistoryPanel from "./HistoryPanel";
@@ -15,9 +16,8 @@ export default function Dashboard() {
 
   const loadEndpoint = useCallback(async () => {
     try {
-      const res = await fetch("/api/endpoint", { cache: "no-store" });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
+      const { ok, status, data } = await getJson<EndpointView & { error?: string }>("/api/endpoint");
+      if (!ok) throw new Error(data.error ?? `HTTP ${status}`);
       setEp(data);
       setEpError(null);
     } catch (e) {
@@ -26,8 +26,9 @@ export default function Dashboard() {
   }, []);
 
   const loadHistory = useCallback(async () => {
-    const res = await fetch("/api/history", { cache: "no-store" });
-    if (res.ok) setHistory(await res.json());
+    // Keep the last good history on transient failures; the next refresh retries.
+    const { ok, data } = await getJson<HistoryView>("/api/history").catch(() => ({ ok: false, data: null }));
+    if (ok && data) setHistory(data);
   }, []);
 
   useEffect(() => {

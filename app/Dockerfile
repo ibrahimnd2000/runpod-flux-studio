@@ -21,6 +21,7 @@ WORKDIR /app
 COPY --from=build /src/.next/standalone ./
 COPY --from=build /src/.next/static ./.next/static
 COPY --from=build /src/public ./public
-USER node
+COPY start.mjs ./
+# Starts as root only to prepare DATA_DIR on the mounted volume, then runs as `node`.
 EXPOSE 3000
-CMD ["node", "server.js"]
+CMD ["node", "start.mjs"]
