@@ -1,0 +1,21 @@
+# Runpod Serverless list prices (flex workers), USD per GPU-hour.
+# Source: https://www.runpod.io/pricing, Serverless table ("Updated October 28, 2026").
+# Checked: 2026-11-03. Re-check before publishing final numbers.
+checked: 2026-11-03
+source: https://www.runpod.io/pricing
+per_hour:
+  # pool ADA_48_PRO
+  "NVIDIA L40": 1.75
+  "NVIDIA L40S": 1.75
+  "NVIDIA RTX 6000 Ada Generation": 1.75
+  # pool AMPERE_48
+  "NVIDIA A40": 1.22
+  "NVIDIA RTX A6000": 1.22
+  # 24 / 80 GB and up, for comparison runs
+  "NVIDIA GeForce RTX 4090": 1.34
+  "NVIDIA A100 80GB PCIe": 2.72
+  "NVIDIA A100-SXM4-80GB": 2.72
+  "NVIDIA H100 80GB HBM3": 5.39
+  "NVIDIA H200": 6.99
+  "NVIDIA B200": 10.79
+network_storage_per_gb_month: 0.07

@@ -34,7 +34,8 @@ def test_defaults():
     p = out["params"]
     assert p["num_inference_steps"] == 28 and p["guidance_scale"] == 3.5
     assert isinstance(out["seed"], int)
-    assert set(out["timings"]) == {"inference_ms", "total_ms"}
+    assert set(out["timings"]) == {"inference_ms", "encode_ms", "total_ms"}
+    assert {"gpu", "vram_total_gb", "peak_vram_gb", "cold_start", "model_load_ms", "jobs_served"} <= set(out["worker"])
 
 
 def test_seed_is_reproducible():
@@ -74,8 +75,32 @@ def test_errors():
 
 
 def test_generation_failure_returns_error(monkeypatch):
-    def boom(p):
+    def boom(p, on_step=None):
         raise RuntimeError("CUDA out of memory. Tried to allocate 2 GiB")
 
     monkeypatch.setattr(handler.BACKEND, "generate", boom)
     assert "out of memory" in run(prompt="x")["error"]
+
+
+def test_cold_start_flag_only_on_first_job():
+    before = run(prompt="x", width=256, height=256)["worker"]["jobs_served"]
+    out = run(prompt="x", width=256, height=256)["worker"]
+    assert out["jobs_served"] == before + 1
+    assert out["cold_start"] is False
+
+
+def test_progress_updates_are_throttled_and_end_on_last_step(monkeypatch):
+    sent = []
+    monkeypatch.setattr(handler, "WORKER_ID", "worker-1")
+    monkeypatch.setattr(handler.runpod.serverless, "progress_update", lambda job, progress: sent.append(progress))
+    run(prompt="x", width=256, height=256, num_inference_steps=28)
+    # Mock steps run instantly, so throttling leaves the first and the final step.
+    assert sent == [{"step": 1, "total_steps": 28}, {"step": 28, "total_steps": 28}]
+
+
+def test_no_progress_updates_outside_runpod(monkeypatch):
+    sent = []
+    monkeypatch.setattr(handler, "WORKER_ID", None)
+    monkeypatch.setattr(handler.runpod.serverless, "progress_update", lambda job, progress: sent.append(progress))
+    run(prompt="x", width=256, height=256)
+    assert sent == []

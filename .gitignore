@@ -22,5 +22,4 @@ node_modules/
 # Outputs
 out/
 *.mp4
-bench/results/*.raw.json
 .DS_Store
