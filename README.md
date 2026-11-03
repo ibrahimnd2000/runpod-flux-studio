@@ -1,5 +1,7 @@
 # FLUX Studio on Runpod Serverless
 
+[![CI](https://github.com/ibrahimnd2000/runpod-flux-studio/actions/workflows/ci.yml/badge.svg)](https://github.com/ibrahimnd2000/runpod-flux-studio/actions/workflows/ci.yml)
+
 Text → product image with **FLUX.1-dev** on a **Runpod Serverless** GPU endpoint, plus a web app that shows,
 for every request, where the time and money went (queue, cold start, GPU time, cost per image), and a second
 endpoint that animates images into short clips with **LTX-2.5**.
