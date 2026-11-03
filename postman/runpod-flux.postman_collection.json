@@ -1,8 +1,8 @@
 {
   "info": {
-    "name": "Runpod FLUX.1-dev endpoint",
+    "name": "Runpod FLUX + LTX endpoints",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
-    "description": "Set the collection variables RUNPOD_API_KEY and ENDPOINT_ID. /runsync returns the image inline (base64 PNG in output.images[0]); /run + /status is the async pattern for long jobs. The 'Run (async)' request stores the job id for 'Status'."
+    "description": "Set RUNPOD_API_KEY, ENDPOINT_ID (FLUX image endpoint) and, for video, VIDEO_ENDPOINT_ID and IMAGE_URL (an https URL of a JPEG/PNG, e.g. a FLUX output). Image: /runsync returns the image inline (base64 PNG in output.images[0]); /run + /status is the async pattern. Video: always /run + /status (clips take minutes on a cold worker); output.video is a base64 MP4 with audio."
   },
   "variable": [
     {
@@ -15,6 +15,18 @@
     },
     {
       "key": "JOB_ID",
+      "value": ""
+    },
+    {
+      "key": "VIDEO_ENDPOINT_ID",
+      "value": ""
+    },
+    {
+      "key": "IMAGE_URL",
+      "value": ""
+    },
+    {
+      "key": "VIDEO_JOB_ID",
       "value": ""
     }
   ],
@@ -151,6 +163,109 @@
         "url": "https://api.runpod.ai/v2/{{ENDPOINT_ID}}/health",
         "description": "Worker counts (idle/running/initializing) and job counts."
       }
+    },
+    {
+      "name": "Video (LTX-2.5)",
+      "item": [
+        {
+          "name": "Animate: run async",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const r = pm.response.json();",
+                  "pm.collectionVariables.set('VIDEO_JOB_ID', r.id);",
+                  "pm.test('queued', () => pm.expect(r.id).to.be.a('string'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{RUNPOD_API_KEY}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "https://api.runpod.ai/v2/{{VIDEO_ENDPOINT_ID}}/run",
+            "description": "Image (https URL, data URI or base64) + motion prompt -> MP4. 540p, 49 frames \u2248 2 s at 24 fps.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"input\": {\n    \"image\": \"{{IMAGE_URL}}\",\n    \"prompt\": \"Slow cinematic camera push-in toward the product, soft light shifting\",\n    \"resolution\": \"540p\",\n    \"num_frames\": 49,\n    \"audio\": true,\n    \"seed\": 42\n  }\n}"
+            }
+          }
+        },
+        {
+          "name": "Animate: status",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const r = pm.response.json();",
+                  "if (r.status === 'COMPLETED' && r.output && r.output.video) {",
+                  "  pm.visualizer.set('<video controls autoplay style=\"max-width:100%\" src=\"data:video/mp4;base64,{{v}}\"></video><p>{{w}} \u00b7 exec {{e}} ms \u00b7 {{b}} bytes</p>', {v: r.output.video, w: (r.output.worker||{}).gpu, e: r.executionTime, b: r.output.bytes});",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{RUNPOD_API_KEY}}"
+              }
+            ],
+            "url": "https://api.runpod.ai/v2/{{VIDEO_ENDPOINT_ID}}/status/{{VIDEO_JOB_ID}}",
+            "description": "IN_QUEUE -> IN_PROGRESS (output = {step, total_steps}) -> COMPLETED. Visualize tab plays the clip."
+          }
+        },
+        {
+          "name": "Animate: bad input (expect FAILED)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{RUNPOD_API_KEY}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "https://api.runpod.ai/v2/{{VIDEO_ENDPOINT_ID}}/runsync",
+            "description": "Missing image: the handler returns {error}, reported as FAILED.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"input\": {\n    \"prompt\": \"push in\"\n  }\n}"
+            }
+          }
+        },
+        {
+          "name": "Video health",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{RUNPOD_API_KEY}}"
+              }
+            ],
+            "url": "https://api.runpod.ai/v2/{{VIDEO_ENDPOINT_ID}}/health"
+          }
+        }
+      ]
     }
   ]
 }
