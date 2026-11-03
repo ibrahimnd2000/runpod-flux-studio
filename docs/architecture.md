@@ -50,3 +50,16 @@ flowchart LR
 `deps` (pytorch 2.14.1 / CUDA 12.6 runtime + pinned Python deps) → `weights` (33.7 GB, downloaded at build
 time with the HF token as a BuildKit secret) → `final` (`handler.py`). A handler change re-pushes a few KB;
 v0.1.0 → v0.2.0 pushed in about 5 s. A `check` stage (deps + handler, no weights) is what CI builds.
+
+## Video endpoint (LTX-2.5)
+
+`Animate` in the app posts a **library image id** to `/api/animate`; the app reads the image from its network
+volume, sends it as a data URI to the video endpoint's `/run`, and polls `/status`. On completion the base64 MP4
+from the job result is written to the library once and served from `/api/media/:id` with HTTP range support.
+Jobs nobody is watching (dialog closed during a long cold start) are finished by the library's list route, so
+clips still land in the library.
+
+The video worker image is 8 GB with no weights: Runpod model caching mounts the 72 GB LTX-2.5 snapshot at
+`/runpod/model-store/huggingface/Lightricks/LTX-2.5-Diffusers/<revision>`, and the handler loads it from there
+(`OFFLOAD=model` keeps components on the GPU only while they run). Separate endpoint, separate 80 GB GPU pools,
+separate daily cap in the app.

@@ -1,7 +1,8 @@
 # FLUX Studio on Runpod Serverless
 
-Text → product image with **FLUX.1-dev** on a **Runpod Serverless** GPU endpoint, plus a small web app that
-shows, for every request, where the time and money went (queue, cold start, GPU time, cost per image).
+Text → product image with **FLUX.1-dev** on a **Runpod Serverless** GPU endpoint, plus a web app that shows,
+for every request, where the time and money went (queue, cold start, GPU time, cost per image), and a second
+endpoint that animates images into short clips with **LTX-2.5**.
 
 **Live demo:** https://t2jragqmgaorlq-3000.proxy.runpod.net (generating needs the access code sent with the submission)
 
@@ -22,13 +23,16 @@ curl -s -X POST https://api.runpod.ai/v2/y6hj5mx4y5b2su/runsync \
 | Serverless endpoint on Runpod | `y6hj5mx4y5b2su`, created by [`scripts/deploy.sh`](scripts/deploy.sh) |
 | Text in → image out | [examples with the exact request and Runpod's response](docs/examples) · curl · Postman · web app |
 
-**Extras** (beyond the brief): measured benchmarks and cold-start study, a hosted Next.js app (single and
-bulk generation, live endpoint dashboard, media library), CI. Video generation with LTX-2.5 is the next step.
+**Extras** (beyond the brief, built on top of it): measured benchmarks and a cold-start study; a hosted Next.js
+app on a Runpod CPU pod (single and parallel bulk generation, live endpoint dashboards, a media library on a
+network volume, beginner tooltips); a second Serverless endpoint for image → video with LTX-2.5 using Runpod
+model caching (deployed; first measured clip pending, see [Video](#video-image--clip-with-ltx-25)); CI.
 
 ## Contents
-[Results](#results) · [Quick start](#quick-start) · [API](#api) · [Architecture](#architecture) ·
-[Design decisions](#design-decisions) · [Cost and business case](#cost-and-business-case) ·
-[Limitations and next steps](#limitations-and-next-steps) · [Repository](#repository)
+[Results](#results) · [Quick start](#quick-start) · [API](#api) · [Video](#video-image--clip-with-ltx-25) ·
+[Architecture](#architecture) · [Design decisions](#design-decisions) · [Platform notes](#platform-notes) ·
+[Cost and business case](#cost-and-business-case) · [Limitations and next steps](#limitations-and-next-steps) ·
+[Repository](#repository)
 
 ## Results
 
@@ -70,7 +74,9 @@ The whole build, all tests and benchmarks cost **under $1** of GPU time.
 | ![Library](docs/screenshots/library.jpg) | ![How it works](docs/screenshots/how-it-works.jpg) |
 
 Open the [live demo](https://t2jragqmgaorlq-3000.proxy.runpod.net), enter the access code, press
-**Generate**. Hover any ⓘ for a plain-language explanation; *How it works* explains every number.
+**Generate**. Switch to **Bulk · parallel** to send up to 8 images at once and watch the autoscaler spread them
+over workers (the run summary shows the speed-up). Every image lands in the **Library**. Hover any ⓘ for a
+plain-language explanation; *How it works* explains every number.
 
 The same app API works from a terminal without a Runpod key:
 ```bash
@@ -100,7 +106,7 @@ MOCK_PIPELINE=1 ../../.venv/bin/python handler.py          # one job from test_i
 MOCK_PIPELINE=1 ../../.venv/bin/python handler.py --rp_serve_api --rp_api_port 8000   # local /run, /runsync, /status
 ```
 `MOCK_PIPELINE=1` swaps FLUX for a deterministic image generator, so validation, errors and the response shape
-are testable on a laptop.
+are testable on a laptop. The video worker works the same way (`cd workers/video && MOCK_PIPELINE=1 ...`).
 
 ### 4. Build and deploy your own
 ```bash
@@ -147,6 +153,35 @@ FLUX.1-dev is guidance-distilled (no classifier-free guidance), so there is no n
 The `worker` block is what makes cold starts and GPU placement visible per request. While a job runs,
 `/status` returns `output: {"step": 14, "total_steps": 28}` from `runpod.serverless.progress_update`.
 
+## Video: image → clip with LTX-2.5
+
+A second Serverless endpoint (`ni76to0oacpj7o`, [`workers/video/`](workers/video)) turns an image, typically a
+FLUX output, plus a motion prompt into an MP4 with audio, using Lightricks **LTX-2.5** (22B, distilled 8-step
+schedule) through diffusers' `LTX2ImageToVideoPipeline`. In the app it's the **Animate** button on any image.
+
+| Input | Default | Rules |
+|---|---|---|
+| `image` | required | https URL, data URI or base64; ≤ 8 MB (Runpod's `/run` limit is 10 MB) |
+| `prompt` | required | the motion, e.g. "slow push-in, steam rising" |
+| `resolution` | `540p` | `540p` (960×544) or `720p` (1280×704); portrait images give portrait clips |
+| `num_frames` | 121 | snapped to 8k+1 within 9–241 (121 ≈ 5 s at 24 fps) |
+| `fps` · `audio` · `seed` | 24 · true · random | |
+
+Output: `video` (base64 MP4), `bytes`, `seed`, `timings`, and the same `worker` block as the image worker. The
+handler refuses results over 15 MB of base64, because Runpod doesn't document a result-size limit.
+
+**How it's deployed.** The weights are ~72 GB (transformer 38 GB, Gemma 4 text encoder 24 GB, connectors 6 GB),
+far too big to bake into an image sensibly, so this endpoint uses **Runpod model caching**: the image is 8 GB
+(code and dependencies only) and Runpod places the weights on hosts itself, without billing the download. The
+repo is gated, so the endpoint was created in the console with the Hugging Face token as a **Runpod Secret**
+(details in [Platform notes](#platform-notes) and [`scripts/deploy_video.sh`](scripts/deploy_video.sh)). GPUs:
+80 GB pools (A100 $2.72/h, H100 $5.39/h). diffusers is pinned to a `main` commit (LTX-2.5 isn't in a release
+yet); CI builds the image's `check` stage, which imports the real pipeline and the Gemma 4 encoder.
+
+**Status:** deployed and verified up to the model mount. The first request was still waiting on Runpod placing
+the weights when this was written; measured clip times and cost will be added here, from raw results, once it
+completes. No video numbers are claimed before then.
+
 ## Architecture
 
 ```mermaid
@@ -155,8 +190,11 @@ flowchart LR
     A -->|"/run · /status · /health<br/>key from Runpod Secrets"| Q[[Serverless queue<br/>autoscaler]]
     C[curl · Postman · bench.py] -->|"/runsync · /run"| Q
     Q --> W["GPU workers: handler.py + FLUX.1-dev BF16<br/>48 GB: L40 · L40S · 6000 Ada · A40 · A6000"]
-    A --- V[("Network volume<br/>history + image library")]
+    A --- V[("Network volume<br/>history + image/video library")]
     R[(Private Docker Hub<br/>30.6 GB image)] -.->|pull per new host| W
+    A -->|"Animate: /run · /status"| VQ[[Video endpoint queue]]
+    VQ --> VW["GPU workers: LTX-2.5 image → video<br/>80 GB: A100 · H100"]
+    MC[(Runpod model cache<br/>LTX-2.5 72 GB)] -.->|mounted on host| VW
 ```
 Request flow, image layers and the full diagram: [`docs/architecture.md`](docs/architecture.md).
 
@@ -210,6 +248,41 @@ Runpod key and access code are Runpod Secrets on the app pod. The browser never 
 **9. FP8.** The handler has an FP8 path (torchao `Float8WeightOnlyConfig`), but it is **not measured yet**, so no
 claims here.
 
+**10. Two endpoints, not one.** Image and video differ in GPU class (48 GB vs 80 GB), job length (seconds vs
+minutes) and price per hour. Separate endpoints scale independently, so a burst of video jobs can't queue image
+requests behind them, and each pays only for the GPU it needs. The app also keeps separate job stores and daily
+caps for the two.
+
+**11. Model caching for the video weights.** Baking worked well for FLUX (30.6 GB, 8.1 s model load) because the
+brief asked for it and the image is pullable in minutes. At 72 GB, baking would make every new host pull ~80 GB
+before its first job. Runpod model caching keeps the image at 8 GB and moves the weight download off the billed
+path. The trade-off: the first placement on a host is slow and opaque (no progress API), and the endpoint has to
+be created where Runpod can hold a token for the gated repo.
+
+## Platform notes
+
+Things found while deploying, worth knowing for anyone building on Runpod (all hit and fixed in this repo):
+
+- **A GPU type is a pool.** `--gpu-id "NVIDIA L40S"` became pool `ADA_48_PRO`, which includes an RTX PRO 6000
+  Blackwell MIG slice. Exclude incompatible types with REST v2 `gpu.excludedTypes` (`pools` and `excludedTypes`
+  are replaced together). Exclusions don't evict workers already placed: they crash-looped and held the only
+  worker slot until the endpoint was recreated.
+- **Template changes don't replace warm workers.** After moving the template to v0.2.0, the next 21 jobs still
+  ran on the warm v0.1.0 worker.
+- **Status signals while a host pulls the image are misleading.** The v1 worker list showed pulling workers as
+  `EXITED` and `/health` counted them `idle`/`ready`; only the worker logs told the truth. Runpod's `idle`
+  workers are stopped and cached for a fast resume and are **not billed** (verified against `currentSpendPerHr`).
+- **Cached models mount at `/runpod/model-store/huggingface/<org>/<name>/<revision>`** (from
+  `runpodctl serverless model-status`), not the `/runpod-volume/huggingface-cache/hub` layout in the docs. The
+  video handler checks both and logs what it finds.
+- **A gated model reference is validated at endpoint creation.** `runpodctl serverless create --model-reference`
+  fails without a token Runpod can use; the console's *Cached model* field takes a Runpod Secret.
+- **Runpod's HTTP proxy is behind Cloudflare.** Next.js marks prerendered pages `s-maxage=31536000`, and
+  Cloudflare served the old HTML after a deploy. The app now sends `max-age=0, must-revalidate` on pages; the
+  already-cached URL could only be escaped with a new pod.
+- **CPU pods don't get a pod volume** (`volumeInGb` was ignored); the app's history and library use a network
+  volume instead.
+
 ## Cost and business case
 
 **Use case:** small e-commerce sellers who need on-brand product images (and, next, 5-second social clips)
@@ -230,10 +303,11 @@ image + clip + copy, and data control. For Runpod, this is recurring GPU spend t
 growth: 10,000 images a month is about **61 GPU-hours** at the measured 21.9 s per image (video multiplies that).
 
 ## Limitations and next steps
-- **Video (in progress):** a second endpoint with **LTX-2.5** (image + motion prompt → 5 s clip with audio) on
-  80 GB GPUs, kept separate so video load can't starve image requests; *Animate* button in the app.
-- **Cold-start study:** same handler with Runpod model caching instead of baked weights; compare first-request
-  times on fresh hosts against the 690 s / 93 s / 35 s measured here.
+- **Video numbers:** first clip, then a small benchmark (540p/720p, 2 s/5 s) for time and $/clip, and enable
+  *Animate* on the hosted app.
+- **Cold-start study:** the FLUX handler with Runpod model caching instead of baked weights; compare first-request
+  times on fresh hosts against the 690 s / 93 s / 35 s measured here (the video endpoint is the first data point
+  for caching).
 - **Blackwell-capable image:** a CUDA 12.8+ PyTorch build so the full GPU pool is usable, and a Dockerfile where
   the weights stage doesn't depend on the deps stage (today a dependency bump re-pushes 34 GB).
 - **FP8 and step caching:** measure speed, quality and $/image against BF16.
@@ -246,11 +320,13 @@ growth: 10,000 images a month is about **61 GPU-hours** at the measured 21.9 s p
 ## Repository
 ```
 workers/image/     FLUX.1-dev Serverless worker: handler.py, Dockerfile (deps → check → weights → final)
-tests/             handler tests with a mocked pipeline + benchmark report tests (run in CI)
+workers/video/     LTX-2.5 image-to-video worker: handler.py, Dockerfile (weights via Runpod model caching)
+tests/             image + video handler tests with mocked pipelines, benchmark report tests (run in CI)
 bench/             bench.py (Runpod delayTime/executionTime, cost), prices.yaml, raw results
-app/               Next.js 16 app: Studio, bulk, library, live endpoint dashboard; Dockerfile for a CPU pod
-scripts/           build_and_push.sh, deploy.sh (endpoint), deploy_app.sh (app pod), generate.sh, curl examples
-postman/           Postman collection: runsync, run, status, validation error, health
+app/               Next.js 16 app: Studio, bulk, library, Animate, live endpoint dashboards; Dockerfile for a CPU pod
+scripts/           build_and_push.sh, deploy.sh (image endpoint), deploy_video.sh, deploy_app.sh (app pod),
+                   generate.sh, curl examples
+postman/           Postman collection: image runsync/run/status/errors/health, video run/status/errors/health
 docs/              architecture, benchmarks, example requests/responses, screenshots
-.github/workflows  CI: ruff, pytest, hadolint, worker image build without weights, app lint/typecheck/build
+.github/workflows  CI: ruff, pytest, hadolint + check-stage builds of both worker images, app lint/typecheck/build
 ```
