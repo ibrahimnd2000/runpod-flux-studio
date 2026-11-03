@@ -1,0 +1,41 @@
+{
+  "endpoint": "y6hj5mx4y5b2su",
+  "request": {
+    "input": {
+      "prompt": "A studio product photo of a ceramic coffee mug on a walnut table, soft morning light, shallow depth of field",
+      "width": 1024,
+      "height": 1024,
+      "num_inference_steps": 28,
+      "seed": 44
+    }
+  },
+  "response": {
+    "delayTime": 137,
+    "executionTime": 22789,
+    "id": "31f74f80-348d-4c14-8e3e-e16d500f55ad-e1",
+    "output": {
+      "images": [
+        "<base64 PNG, saved as warm-1024-3.png>"
+      ],
+      "params": {
+        "guidance_scale": 3.5,
+        "height": 1024,
+        "image_format": "png",
+        "model": "/models/FLUX.1-dev",
+        "num_images": 1,
+        "num_inference_steps": 28,
+        "output": "base64",
+        "precision": "bf16",
+        "seed": 44,
+        "width": 1024
+      },
+      "seed": 44,
+      "timings": {
+        "inference_ms": 22266.2,
+        "total_ms": 22566.5
+      }
+    },
+    "status": "COMPLETED",
+    "workerId": "02s8hsxxc8ajzi"
+  }
+}
