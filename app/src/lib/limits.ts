@@ -4,7 +4,8 @@ import { timingSafeEqual } from "node:crypto";
 
 import { config } from "./config";
 import { submittedByIpSince, submittedSince } from "./store";
-import type { GenerateInput } from "./types";
+import type { AnimateInput, GenerateInput } from "./types";
+import { videosSubmittedSince } from "./videoStore";
 
 // Every Generate spends GPU credits, so the public demo is guarded by an access
 // code, a per-IP rate limit, a daily job cap and tighter size/step limits than the
@@ -58,6 +59,17 @@ export function checkAccess(code: string | null, ip: string, count = 1) {
     );
 }
 
+/** Video: access code, its own daily cap (clips cost ~10x an image) and the shared per-visitor rate limit. */
+export function checkVideoAccess(code: string | null, ip: string) {
+  if (!config.videoEndpointId) throw new LimitError("Video generation isn't enabled on this deployment.", 503);
+  checkCode(code);
+  const used = videosSubmittedSince(startOfUtcDay());
+  if (used >= config.videoDailyCap)
+    throw new LimitError(`Daily demo cap of ${config.videoDailyCap} videos reached; resets at 00:00 UTC.`, 429);
+  if (submittedByIpSince(ip, Date.now() - 10 * 60_000) >= config.perIpPer10Min)
+    throw new LimitError(`Rate limit: ${config.perIpPer10Min} jobs per 10 minutes per visitor.`, 429);
+}
+
 const clamp = (v: unknown, lo: number, hi: number, fallback: number) => {
   const n = Math.round(Number(v));
   return Number.isFinite(n) ? Math.min(Math.max(n, lo), hi) : fallback;
@@ -77,5 +89,23 @@ export function sanitizeInput(body: Record<string, unknown>): GenerateInput {
   if (body.seed !== undefined && body.seed !== null && body.seed !== "") {
     input.seed = clamp(body.seed, 0, 2 ** 32 - 1, 0);
   }
+  return input;
+}
+
+/** 8k+1 frames for LTX; snapped to the nearest valid count within the demo limit. */
+export function sanitizeAnimate(body: Record<string, unknown>): AnimateInput {
+  const sourceId = typeof body.sourceId === "string" ? body.sourceId : "";
+  if (!sourceId) throw new LimitError("Pick an image from the library to animate.", 400);
+  const prompt = typeof body.prompt === "string" ? body.prompt.trim().slice(0, 1000) : "";
+  if (!prompt) throw new LimitError("Describe the motion, e.g. 'slow camera push-in, steam rising'.", 400);
+  const frames = clamp(body.num_frames, 9, config.videoMaxFrames, 121);
+  const input: AnimateInput = {
+    sourceId,
+    prompt,
+    resolution: body.resolution === "720p" ? "720p" : "540p",
+    num_frames: Math.min(Math.round((frames - 1) / 8) * 8 + 1, config.videoMaxFrames),
+    audio: body.audio !== false,
+  };
+  if (body.seed !== undefined && body.seed !== null && body.seed !== "") input.seed = clamp(body.seed, 0, 2 ** 32 - 1, 0);
   return input;
 }

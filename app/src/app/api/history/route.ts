@@ -5,6 +5,7 @@ import { startOfUtcDay } from "@/lib/limits";
 import { pricesChecked } from "@/lib/prices";
 import { history, submittedSince } from "@/lib/store";
 import type { HistoryView } from "@/lib/types";
+import { videosSubmittedSince } from "@/lib/videoStore";
 
 function pct(values: number[], q: number): number | null {
   if (!values.length) return null;
@@ -42,6 +43,9 @@ export async function GET() {
       maxSteps: config.maxSteps,
       bulkMax: config.bulkMax,
       perIpPer10Min: config.perIpPer10Min,
+      videoEnabled: !!config.videoEndpointId,
+      videoDailyCap: config.videoDailyCap,
+      videoUsedToday: videosSubmittedSince(startOfUtcDay()),
     },
     pricesChecked,
   };

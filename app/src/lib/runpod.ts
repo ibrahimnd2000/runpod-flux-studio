@@ -48,10 +48,8 @@ export function jobStatus(id: string) {
   return call<RunpodStatus>(`${JOBS_API}/${config.endpointId}/status/${encodeURIComponent(id)}`);
 }
 
-export function endpointHealth() {
-  return call<{ workers: Record<string, number>; jobs: Record<string, number> }>(
-    `${JOBS_API}/${config.endpointId}/health`,
-  );
+export function endpointHealth(endpointId = config.endpointId) {
+  return call<{ workers: Record<string, number>; jobs: Record<string, number> }>(`${JOBS_API}/${endpointId}/health`);
 }
 
 export interface EndpointConfig {
@@ -65,8 +63,31 @@ export interface EndpointConfig {
   timeout?: number;
 }
 
-export function endpointConfig() {
-  return call<EndpointConfig>(`${MGMT_API}/serverless/${config.endpointId}`);
+export function endpointConfig(endpointId = config.endpointId) {
+  return call<EndpointConfig>(`${MGMT_API}/serverless/${endpointId}`);
+}
+
+// --------------------------------------------------------------------------- //
+//                         Image-to-video (LTX-2.5) endpoint                   //
+// --------------------------------------------------------------------------- //
+export interface VideoJobInput {
+  image: string; // data URI of a library image
+  prompt: string;
+  resolution: "540p" | "720p";
+  num_frames: number;
+  audio: boolean;
+  seed?: number;
+}
+
+export function submitVideoJob(input: VideoJobInput) {
+  return call<{ id: string; status: JobStatus }>(`${JOBS_API}/${config.videoEndpointId}/run`, {
+    method: "POST",
+    body: JSON.stringify({ input }),
+  });
+}
+
+export function videoJobStatus(id: string) {
+  return call<RunpodStatus>(`${JOBS_API}/${config.videoEndpointId}/status/${encodeURIComponent(id)}`);
 }
 
 export interface GpuCatalogEntry {

@@ -1,6 +1,6 @@
 "use client";
 
-import { Copy, Download, Images, Loader2, RotateCcw, Sparkles } from "lucide-react";
+import { Clapperboard, Copy, Download, Images, Loader2, RotateCcw, Sparkles } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 
@@ -24,11 +24,14 @@ export default function SingleResult({
   image,
   problem,
   onReuse,
+  onAnimate,
 }: {
   job: JobView | null;
   image: string | null;
   problem: Problem | null;
   onReuse: (job: JobView) => void;
+  /** Present only when the deployment has a video endpoint. */
+  onAnimate?: (job: JobView, image: string) => void;
 }) {
   const toast = useToast();
   const [now, setNow] = useState(0);
@@ -96,6 +99,11 @@ export default function SingleResult({
           </div>
           {image && job.status === "COMPLETED" && (
             <div className="mt-3 flex flex-wrap gap-2">
+              {onAnimate && (
+                <Button size="sm" variant="primary" icon={<Clapperboard className="h-3.5 w-3.5" />} onClick={() => onAnimate(job, image)}>
+                  Animate
+                </Button>
+              )}
               <a href={image} download={`flux-${job.output?.seed ?? job.id}.jpg`} className={buttonClass("secondary", "sm")}>
                 <Download className="h-3.5 w-3.5" /> Download
               </a>

@@ -20,6 +20,11 @@ export const config = {
   bulkMax: int("BULK_MAX", 8),
   maxSide: int("MAX_SIDE", 1024),
   maxSteps: int("MAX_STEPS", 28),
+  // Image-to-video (LTX-2.5) endpoint; empty = the Animate feature is hidden.
+  videoEndpointId: process.env.RUNPOD_VIDEO_ENDPOINT_ID ?? "",
+  // A clip costs ~10x an image, so videos get their own, smaller daily cap.
+  videoDailyCap: int("VIDEO_DAILY_CAP", 20),
+  videoMaxFrames: int("VIDEO_MAX_FRAMES", 121),
   // Job history survives restarts when this points at a persistent volume.
   dataDir: process.env.DATA_DIR ?? "",
 };

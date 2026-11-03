@@ -16,8 +16,8 @@ const Ctx = createContext<EndpointState>({ ep: null, error: null, refresh: () =>
 
 const POLL_MS = 5000;
 
-/** Polls /api/endpoint once for the whole app (sidebar status + Studio endpoint card). */
-export function EndpointProvider({ children }: { children: React.ReactNode }) {
+/** Polls one endpoint's /api/endpoint view, keeping the last good data on failures. */
+export function usePolledEndpoint(which: "image" | "video", intervalMs: number): EndpointState {
   const [ep, setEp] = useState<EndpointView | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [tick, setTick] = useState(0);
@@ -25,7 +25,7 @@ export function EndpointProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     let cancelled = false;
     const load = async () => {
-      const res = await getJson<EndpointView>("/api/endpoint");
+      const res = await getJson<EndpointView>(which === "video" ? "/api/endpoint?which=video" : "/api/endpoint");
       if (cancelled) return;
       if (res.ok) {
         setEp(res.data);
@@ -36,15 +36,21 @@ export function EndpointProvider({ children }: { children: React.ReactNode }) {
       }
     };
     const first = setTimeout(load, 0);
-    const t = setInterval(load, POLL_MS);
+    const t = setInterval(load, intervalMs);
     return () => {
       cancelled = true;
       clearTimeout(first);
       clearInterval(t);
     };
-  }, [tick]);
+  }, [tick, which, intervalMs]);
 
-  return <Ctx.Provider value={{ ep, error, refresh: () => setTick((n) => n + 1) }}>{children}</Ctx.Provider>;
+  return { ep, error, refresh: () => setTick((n) => n + 1) };
+}
+
+/** Polls the image endpoint once for the whole app (sidebar status + Studio endpoint card). */
+export function EndpointProvider({ children }: { children: React.ReactNode }) {
+  const state = usePolledEndpoint("image", POLL_MS);
+  return <Ctx.Provider value={state}>{children}</Ctx.Provider>;
 }
 
 export const useEndpoint = () => useContext(Ctx);

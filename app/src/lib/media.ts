@@ -6,10 +6,11 @@ import { join } from "node:path";
 import { config } from "./config";
 import type { MediaItem } from "./types";
 
-// Media library: every completed image is saved as DATA_DIR/images/<jobId>.jpg
-// (the pod's network volume), indexed in DATA_DIR/media.jsonl. The index is
-// append-only; a deletion is a tombstone line, so the last line per id wins.
-// Without DATA_DIR (local dev) images are kept in memory, newest 50 only.
+// Media library: every completed image (and clip) is saved as
+// DATA_DIR/images/<jobId>.jpg|.mp4 (the pod's network volume), indexed in
+// DATA_DIR/media.jsonl. The index is append-only; a deletion is a tombstone line,
+// so the last line per id wins. Without DATA_DIR (local dev) files are kept in
+// memory, newest 50 only.
 
 const MEMORY_MAX = 50;
 const dir = config.dataDir ? join(config.dataDir, "images") : "";
@@ -45,20 +46,26 @@ function load() {
 
 const media = (g.__fluxMedia ??= load());
 
+const EXT = { image: "jpg", video: "mp4" } as const;
+const MIME = { image: "image/jpeg", video: "video/mp4" } as const;
+const kindOf = (item: MediaItem) => item.kind ?? "image";
+const fileFor = (item: MediaItem) => join(dir, `${item.id}.${EXT[kindOf(item)]}`);
+
 function append(entry: Entry) {
   if (!indexFile) return;
   mkdirSync(config.dataDir, { recursive: true });
   appendFileSync(indexFile, JSON.stringify(entry) + "\n");
 }
 
-/** Saves a completed job's image. Failures are logged, never thrown: a missing library copy must not fail the job. */
-export function saveImage(item: MediaItem, base64Jpeg: string) {
-  if (!isValidId(item.id) || media.items.has(item.id)) return;
-  const bytes = Buffer.from(base64Jpeg, "base64");
+/** Saves a completed job's image or clip. Failures are logged, never thrown: a missing library copy must not fail the job. */
+export function saveMedia(item: MediaItem, base64: string): boolean {
+  if (!isValidId(item.id) || media.items.has(item.id)) return media.items.has(item.id);
+  const bytes = Buffer.from(base64, "base64");
+  item = { ...item, kind: kindOf(item), mime: MIME[kindOf(item)] };
   try {
     if (dir) {
       mkdirSync(dir, { recursive: true });
-      writeFileSync(join(dir, `${item.id}.jpg`), bytes);
+      writeFileSync(fileFor(item), bytes);
     } else {
       media.memory.set(item.id, bytes);
       while (media.memory.size > MEMORY_MAX) {
@@ -70,27 +77,38 @@ export function saveImage(item: MediaItem, base64Jpeg: string) {
     const saved = { ...item, bytes: bytes.length };
     media.items.set(item.id, saved);
     append(saved);
+    return true;
   } catch (e) {
-    console.error(`could not save image ${item.id} to the media library`, e);
+    console.error(`could not save ${item.id} to the media library`, e);
+    return false;
   }
+}
+
+/** Kept for the image job route. */
+export const saveImage = (item: MediaItem, base64Jpeg: string) => saveMedia({ ...item, kind: "image" }, base64Jpeg);
+
+export function getMediaItem(id: string): MediaItem | undefined {
+  return isValidId(id) ? media.items.get(id) : undefined;
 }
 
 export function listMedia(): MediaItem[] {
   return [...media.items.values()].sort((a, b) => b.createdAt - a.createdAt);
 }
 
-export function readImage(id: string): Buffer | null {
-  if (!isValidId(id) || !media.items.has(id)) return null;
-  if (!dir) return media.memory.get(id) ?? null;
-  const path = join(dir, `${id}.jpg`);
-  return existsSync(path) ? readFileSync(path) : null;
+export function readMedia(id: string): { bytes: Buffer; mime: string; kind: "image" | "video" } | null {
+  const item = getMediaItem(id);
+  if (!item) return null;
+  const kind = kindOf(item);
+  const bytes = dir ? (existsSync(fileFor(item)) ? readFileSync(fileFor(item)) : null) : (media.memory.get(id) ?? null);
+  return bytes ? { bytes, mime: MIME[kind], kind } : null;
 }
 
 /** Deletes the image file and tombstones its index entry. Returns false if it didn't exist. */
 export function deleteImage(id: string): boolean {
-  if (!isValidId(id) || !media.items.has(id)) return false;
+  const item = getMediaItem(id);
+  if (!item) return false;
   if (dir) {
-    const path = join(dir, `${id}.jpg`);
+    const path = fileFor(item);
     if (existsSync(path)) unlinkSync(path);
   } else {
     media.memory.delete(id);

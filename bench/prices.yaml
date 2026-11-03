@@ -15,7 +15,10 @@ per_hour:
   "NVIDIA GeForce RTX 4090": 1.34
   "NVIDIA A100 80GB PCIe": 2.72
   "NVIDIA A100-SXM4-80GB": 2.72
+  # pool ADA_80_PRO
   "NVIDIA H100 80GB HBM3": 5.39
+  "NVIDIA H100 NVL": 5.39
+  "NVIDIA H100 PCIe": 5.39
   "NVIDIA H200": 6.99
   "NVIDIA B200": 10.79
 network_storage_per_gb_month: 0.07

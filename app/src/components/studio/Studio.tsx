@@ -12,6 +12,7 @@ import { useAccessCode } from "../useAccessCode";
 import BulkResults from "./BulkResults";
 import Composer, { ASPECTS, bulkPrompts, DEFAULT_SETTINGS, type Aspect, type Settings } from "./Composer";
 import EndpointCard from "./EndpointCard";
+import AnimateDialog, { type AnimateSource } from "../video/AnimateDialog";
 import RecentRuns from "./RecentRuns";
 import SingleResult from "./SingleResult";
 import { useBulkRun, useSingleJob } from "./useJobs";
@@ -63,6 +64,9 @@ export default function Studio() {
 
   const single = useSingleJob(onSingleFinished);
   const bulk = useBulkRun(onBulkFinished);
+
+  const [animate, setAnimate] = useState<AnimateSource | null>(null);
+  const closeAnimate = useCallback(() => setAnimate(null), []);
 
   const size = ASPECTS[settings.aspect];
   const limits = history?.limits;
@@ -123,15 +127,28 @@ export default function Studio() {
             {settings.mode === "bulk" ? (
               <BulkResults run={bulk.run} now={bulk.now} problem={bulk.problem} />
             ) : (
-              <SingleResult job={single.job} image={single.image} problem={single.problem} onReuse={reuse} />
+              <SingleResult
+                job={single.job}
+                image={single.image}
+                problem={single.problem}
+                onReuse={reuse}
+                // The image job id is also its library id (saved on completion).
+                onAnimate={
+                  limits?.videoEnabled
+                    ? (job, image) => setAnimate({ id: job.id, prompt: job.input.prompt, url: image })
+                    : undefined
+                }
+              />
             )}
           </Card>
           <RecentRuns h={history} error={historyError} />
         </div>
         <div className="space-y-6 xl:sticky xl:top-6 xl:self-start">
           <EndpointCard />
+          {limits?.videoEnabled && <EndpointCard which="video" />}
         </div>
       </div>
+      {animate && <AnimateDialog source={animate} onClose={closeAnimate} />}
     </div>
   );
 }

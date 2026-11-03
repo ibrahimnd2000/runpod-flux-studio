@@ -1,6 +1,6 @@
 "use client";
 
-import { Check, Download, Images, Search, Trash2, X } from "lucide-react";
+import { Check, Clapperboard, Download, Images, Play, Search, Trash2, X } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 
@@ -13,6 +13,7 @@ import { Badge, Button, buttonClass, Card, EmptyState, Skeleton } from "./ui/pri
 import { useToast } from "./ui/Toaster";
 import { Term } from "./ui/Tooltip";
 import { useAccessCode } from "./useAccessCode";
+import AnimateDialog, { type AnimateSource } from "./video/AnimateDialog";
 
 const mb = (bytes: number) => `${(bytes / 2 ** 20).toFixed(1)} MB`;
 
@@ -27,6 +28,7 @@ export default function Library() {
   const [problem, setProblem] = useState<{ title: string; detail?: string } | null>(null);
   const { code, setCode, remember } = useAccessCode();
   const toast = useToast();
+  const [animate, setAnimate] = useState<AnimateSource | null>(null);
 
   const load = useCallback(async () => {
     const res = await getJson<MediaView>("/api/media");
@@ -37,6 +39,11 @@ export default function Library() {
       setLoadError(res.error ?? "Unknown error");
     }
   }, []);
+
+  const closeAnimate = useCallback(() => {
+    setAnimate(null);
+    load(); // pick up a clip that finished meanwhile
+  }, [load]);
 
   useEffect(() => {
     const first = setTimeout(load, 0);
@@ -196,9 +203,18 @@ export default function Library() {
             >
               <div className="relative bg-muted" style={{ aspectRatio: item.width / item.height }}>
                 <button type="button" className="h-full w-full" onClick={() => setOpen(item)} aria-label={`Open: ${item.prompt}`}>
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={`/api/media/${item.id}`} alt={item.prompt} loading="lazy" className="h-full w-full object-cover" />
+                  {item.kind === "video" ? (
+                    <video src={`/api/media/${item.id}#t=0.5`} muted playsInline preload="metadata" className="h-full w-full object-cover" />
+                  ) : (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={`/api/media/${item.id}`} alt={item.prompt} loading="lazy" className="h-full w-full object-cover" />
+                  )}
                 </button>
+                {item.kind === "video" && (
+                  <span className="pointer-events-none absolute right-2 bottom-2 flex items-center gap-1 rounded-full bg-black/70 px-2 py-0.5 text-[10px] font-medium text-white">
+                    <Play className="h-3 w-3 fill-current" /> {item.durationS ? `${item.durationS.toFixed(1)}s` : "video"}
+                  </span>
+                )}
                 <button
                   type="button"
                   onClick={() => toggle(item.id)}
@@ -233,8 +249,12 @@ export default function Library() {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm" onClick={() => setOpen(null)} role="dialog" aria-modal="true" aria-label="Image details">
           <div className="max-h-full w-full max-w-5xl overflow-auto rounded-2xl border border-border bg-card p-5 shadow-2xl" onClick={(e) => e.stopPropagation()}>
             <div className="grid gap-5 md:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={`/api/media/${open.id}`} alt={open.prompt} className="w-full rounded-xl" />
+              {open.kind === "video" ? (
+                <video src={`/api/media/${open.id}`} controls autoPlay loop playsInline className="w-full rounded-xl" />
+              ) : (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={`/api/media/${open.id}`} alt={open.prompt} className="w-full rounded-xl" />
+              )}
               <div className="flex flex-col gap-4 text-sm">
                 <div className="flex items-start justify-between gap-3">
                   <p className="leading-relaxed">{open.prompt}</p>
@@ -243,7 +263,8 @@ export default function Library() {
                 <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-xs">
                   <dt className="text-subtle">Size</dt>
                   <dd className="text-right font-mono">
-                    {open.width}×{open.height} · {open.steps} steps
+                    {open.width}×{open.height}
+                    {open.kind === "video" ? ` · ${open.durationS ?? "?"} s · LTX-2.5` : ` · ${open.steps} steps`}
                   </dd>
                   <dt className="text-subtle"><Term term="seed" side="right">Seed</Term></dt>
                   <dd className="text-right font-mono">{open.seed ?? "–"}</dd>
@@ -257,7 +278,19 @@ export default function Library() {
                   <dd className="text-right">{new Date(open.createdAt).toLocaleString()}</dd>
                 </dl>
                 <div className="mt-auto flex flex-wrap gap-2">
-                  <a className={buttonClass("primary", "md")} href={`/api/media/${open.id}?download`}>
+                  {view?.videoEnabled && open.kind !== "video" && (
+                    <Button
+                      variant="primary"
+                      icon={<Clapperboard className="h-4 w-4" />}
+                      onClick={() => {
+                        setAnimate({ id: open.id, prompt: open.prompt, url: `/api/media/${open.id}` });
+                        setOpen(null);
+                      }}
+                    >
+                      Animate
+                    </Button>
+                  )}
+                  <a className={buttonClass(open.kind === "video" || !view?.videoEnabled ? "primary" : "secondary", "md")} href={`/api/media/${open.id}?download`}>
                     <Download className="h-4 w-4" /> Download
                   </a>
                   <Button
@@ -276,6 +309,7 @@ export default function Library() {
           </div>
         </div>
       )}
+      {animate && <AnimateDialog source={animate} onClose={closeAnimate} />}
     </div>
   );
 }

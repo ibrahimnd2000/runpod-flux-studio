@@ -36,6 +36,15 @@ export const GLOSSARY = {
   idleTimeout: "How long a warm worker waits for another job before shutting down. Longer = more warm starts, more idle cost.",
   vram: "GPU memory used at peak. FLUX.1-dev in BF16 needs about 34 GB, so it runs on 48 GB cards without offloading.",
   accessCode: "This public demo spends real GPU credits, so generating and deleting need the code you were given.",
+  animate:
+    "Turns this image into a short clip with LTX-2.5 on a separate 80 GB GPU endpoint. The image is the first frame; your prompt describes the motion.",
+  motionPrompt:
+    "Describe what moves and how the camera behaves, not what's in the picture: 'slow push-in, steam rising, soft light flicker'.",
+  duration: "Length of the clip at 24 fps. 2 s is quicker and cheaper for drafts; 5 s is the usual social-clip length.",
+  videoResolution: "540p is faster and smaller; 720p looks sharper but takes longer and makes a bigger file.",
+  audio: "LTX-2.5 generates a matching soundtrack (ambience, effects) together with the video.",
+  videoColdStart:
+    "The video model is 72 GB (a 22B video transformer plus a text encoder). A worker that isn't warm has to load it first, which can take several minutes. Later clips on the same worker start right away.",
 } as const;
 
 export type GlossaryKey = keyof typeof GLOSSARY;

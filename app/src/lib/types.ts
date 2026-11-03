@@ -100,13 +100,22 @@ export interface HistoryView {
     maxSteps: number;
     bulkMax: number;
     perIpPer10Min: number;
+    videoEnabled: boolean;
+    videoDailyCap: number;
+    videoUsedToday: number;
   };
   pricesChecked: string;
 }
 
-/** An image saved in the media library (the file itself is served by /api/media/[id]). */
+/** An image or clip saved in the media library (the file itself is served by /api/media/[id]). */
 export interface MediaItem {
   id: string;
+  /** Missing on items saved before videos existed: treat as "image". */
+  kind?: "image" | "video";
+  mime?: string;
+  /** For videos: the library image it was animated from, and its length. */
+  sourceId?: string;
+  durationS?: number;
   createdAt: number;
   prompt: string;
   width: number;
@@ -122,4 +131,43 @@ export interface MediaItem {
 export interface MediaView {
   items: MediaItem[];
   usage: { count: number; bytes: number; persistent: boolean };
+  videoEnabled: boolean;
+}
+
+// --------------------------------------------------------------------------- //
+//                                   Video                                     //
+// --------------------------------------------------------------------------- //
+export interface AnimateInput {
+  sourceId: string; // library image to animate
+  prompt: string; // motion description
+  resolution: "540p" | "720p";
+  num_frames: number; // 8k+1; 49 ≈ 2 s, 121 ≈ 5 s at 24 fps
+  audio: boolean;
+  seed?: number;
+}
+
+/** The `worker` block of workers/video/handler.py (same shape as the image worker's). */
+export type VideoWorkerInfo = WorkerInfo;
+
+export interface VideoJobView {
+  id: string;
+  status: JobStatus;
+  submittedAt: number;
+  input: AnimateInput;
+  sourcePrompt?: string;
+  progress?: { step: number; total_steps: number };
+  delayMs?: number;
+  executionMs?: number;
+  clientWallMs?: number;
+  output?: {
+    mediaId: string;
+    url: string;
+    bytes: number;
+    seed: number;
+    timings: { inference_ms: number; encode_ms: number; total_ms: number };
+    worker?: VideoWorkerInfo;
+    params: Record<string, unknown>;
+  };
+  costUsd?: number;
+  error?: string;
 }

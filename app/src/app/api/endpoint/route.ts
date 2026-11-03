@@ -8,7 +8,7 @@ import type { EndpointView } from "@/lib/types";
 // endpoint's configuration (GPU pools, exclusions, scaling) from REST v2.
 // Cached for a few seconds so many open dashboards don't hammer the API.
 
-let cache: { at: number; view: EndpointView } | null = null;
+const cache = new Map<string, { at: number; view: EndpointView }>();
 let poolMembers: Map<string, string[]> | null = null;
 
 async function membersByPool() {
@@ -20,18 +20,23 @@ async function membersByPool() {
   return poolMembers;
 }
 
-export async function GET() {
+// ?which=video reads the LTX-2.5 endpoint instead of the image endpoint.
+export async function GET(req: Request) {
   await connection(); // live data: never prerender at build time
-  if (cache && Date.now() - cache.at < 4000) return Response.json(cache.view);
+  const video = new URL(req.url).searchParams.get("which") === "video";
+  const endpointId = video ? config.videoEndpointId : config.endpointId;
+  if (!endpointId) return Response.json({ error: "No video endpoint configured." }, { status: 404 });
+  const hit = cache.get(endpointId);
+  if (hit && Date.now() - hit.at < 4000) return Response.json(hit.view);
   try {
     const [cfg, health, pools] = await Promise.all([
-      endpointConfig(),
-      endpointHealth().catch(() => null),
+      endpointConfig(endpointId),
+      endpointHealth(endpointId).catch(() => null),
       membersByPool().catch(() => new Map<string, string[]>()),
     ]);
     const excluded = cfg.gpu?.excludedTypes ?? [];
     const view: EndpointView = {
-      id: config.endpointId,
+      id: endpointId,
       name: cfg.name,
       image: cfg.image,
       gpuPools: cfg.gpu?.pools ?? [],
@@ -46,7 +51,7 @@ export async function GET() {
       health,
       fetchedAt: Date.now(),
     };
-    cache = { at: Date.now(), view };
+    cache.set(endpointId, { at: Date.now(), view });
     return Response.json(view);
   } catch (e) {
     console.error("endpoint failed", e);

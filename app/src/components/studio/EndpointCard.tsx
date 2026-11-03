@@ -5,7 +5,7 @@ import { useState } from "react";
 
 import { ago, secs, shortGpu } from "../format";
 import Notice from "../Notice";
-import { endpointStatus, useEndpoint } from "../EndpointProvider";
+import { endpointStatus, useEndpoint, usePolledEndpoint } from "../EndpointProvider";
 import { Badge, Card, Skeleton } from "../ui/primitives";
 import { Term } from "../ui/Tooltip";
 
@@ -24,8 +24,20 @@ const JOB_STATES = [
   ["failed", "Failed"],
 ] as const;
 
-export default function EndpointCard() {
-  const { ep, error } = useEndpoint();
+export default function EndpointCard({ which = "image" }: { which?: "image" | "video" }) {
+  return which === "video" ? <VideoCard /> : <ImageCard />;
+}
+
+function ImageCard() {
+  return <Body title="Image GPU endpoint" {...useEndpoint()} />;
+}
+
+function VideoCard() {
+  const state = usePolledEndpoint("video", 10_000);
+  return <Body title="Video GPU endpoint · LTX-2.5" {...state} />;
+}
+
+function Body({ title, ep, error }: { title: string } & ReturnType<typeof useEndpoint>) {
   const [showConfig, setShowConfig] = useState(false);
   const status = endpointStatus(ep, error);
 
@@ -33,7 +45,7 @@ export default function EndpointCard() {
     <Card
       title={
         <span className="flex items-center gap-2">
-          <Server className="h-4 w-4 text-subtle" /> GPU endpoint
+          <Server className="h-4 w-4 text-subtle" /> {title}
         </span>
       }
       actions={ep && <Badge tone={status.tone as "green"}>{status.label}</Badge>}

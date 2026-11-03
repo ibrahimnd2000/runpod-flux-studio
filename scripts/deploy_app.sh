@@ -42,6 +42,9 @@ print(json.dumps({
         "RUNPOD_API_KEY": "{{ RUNPOD_SECRET_flux_demo_api_key }}",
         "DEMO_ACCESS_CODE": "{{ RUNPOD_SECRET_flux_demo_access_code }}",
         "RUNPOD_IMAGE_ENDPOINT_ID": os.environ["RUNPOD_IMAGE_ENDPOINT_ID"],
+        # Optional: enables Animate (LTX-2.5 image-to-video).
+        "RUNPOD_VIDEO_ENDPOINT_ID": os.environ.get("RUNPOD_VIDEO_ENDPOINT_ID", ""),
+        "VIDEO_DAILY_CAP": "20",
         "DATA_DIR": "/workspace/flux-app",
         "DAILY_JOB_CAP": "100",
         "RATE_LIMIT_PER_10_MIN": "12",
