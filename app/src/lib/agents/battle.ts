@@ -138,7 +138,8 @@ export function leaderboard(): LeaderboardRow[] {
     if (!rows.has(key)) rows.set(key, { key, contestant: c, battles: 0, wins: 0, losses: 0, ties: 0, rating: 1000, avgUsd: 0, avgSeconds: 0, usd: 0, secs: 0 });
     return rows.get(key)!;
   };
-  for (const b of [...listBattles()].reverse()) {
+  // Oldest first (stable for equal timestamps, unlike reversing a newest-first list).
+  for (const b of [...listBattles()].sort((x, y) => x.createdAt - y.createdAt)) {
     const outcome = b.vote ?? b.judge?.winner;
     if (b.status !== "done" || !outcome) continue;
     const [ra, rb] = SIDES.map((s) => row(b.contestants[s]));
