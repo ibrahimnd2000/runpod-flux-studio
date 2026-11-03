@@ -246,6 +246,8 @@ class VllmSession implements LlmSession {
       signal: AbortSignal.timeout(10 * 60_000),
       cache: "no-store",
     });
+    if (res.status === 401 || res.status === 403)
+      throw new Error(`Runpod vLLM ${res.status}: the app's Runpod API key has no access to endpoint ${llmEndpoint} (restricted keys must list it).`);
     if (!res.ok) throw new Error(`Runpod vLLM ${res.status}: ${(await res.text()).slice(0, 300)}`);
     const data = (await res.json()) as {
       choices: { message: OaiMessage; finish_reason: string }[];
