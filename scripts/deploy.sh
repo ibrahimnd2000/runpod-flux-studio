@@ -24,14 +24,17 @@ IDLE_TIMEOUT="${IDLE_TIMEOUT:-60}"  # seconds a warm worker waits for the next j
 EXEC_TIMEOUT="${EXEC_TIMEOUT:-600}" # max seconds per job
 
 # Container disk holds the cached image (~38 GB) plus scratch space.
-TEMPLATE_ID=$(runpodctl template create \
-  --name "flux-worker-${IMAGE##*:}" \
-  --image "${IMAGE}" \
-  --serverless \
-  --registry-auth-id "${REGISTRY_AUTH_ID}" \
-  --container-disk-in-gb 60 \
-  --env '{"MODEL_PRECISION":"bf16"}' \
-  | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+# Set TEMPLATE_ID to reuse an existing template instead of creating one.
+if [[ -z "${TEMPLATE_ID:-}" ]]; then
+  TEMPLATE_ID=$(runpodctl template create \
+    --name "flux-worker-${IMAGE##*:}" \
+    --image "${IMAGE}" \
+    --serverless \
+    --registry-auth-id "${REGISTRY_AUTH_ID}" \
+    --container-disk-in-gb 60 \
+    --env '{"MODEL_PRECISION":"bf16"}' \
+    | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+fi
 echo "template: ${TEMPLATE_ID}"
 
 ENDPOINT_ID=$(runpodctl serverless create \
