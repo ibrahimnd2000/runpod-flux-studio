@@ -63,6 +63,8 @@ export function endpointStatus(ep: EndpointView | null, error: string | null) {
   // "idle" workers are stopped (not billed) but cached for a fast resume.
   if ((w.running ?? 0) > 0) return { tone: "green", label: `${w.running} active` };
   if ((w.initializing ?? 0) > 0) return { tone: "amber", label: "Starting a worker" };
+  // Jobs waiting but nothing active: workers are throttled (GPU busy) or not placed yet.
+  if ((ep.health?.jobs.inQueue ?? 0) > 0) return { tone: "amber", label: "Waiting for a GPU" };
   if ((w.unhealthy ?? 0) > 0) return { tone: "red", label: "Worker unhealthy" };
   if ((w.idle ?? 0) > 0) return { tone: "blue", label: "Scaled to zero · ready" };
   return { tone: "blue", label: "Scaled to zero" };
