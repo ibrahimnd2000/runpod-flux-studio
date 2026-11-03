@@ -5,7 +5,7 @@ shows, for every request, where the time and money went (queue, cold start, GPU 
 
 **Live demo:** https://t2jragqmgaorlq-3000.proxy.runpod.net (generating needs the access code sent with the submission)
 
-![Studio: composer, result with request inspector, live endpoint card](docs/screenshots/studio.png)
+![Studio: result with the request inspector (where the time went, GPU, cost) and the live endpoint card](docs/screenshots/studio.jpg)
 
 ```bash
 # One command against the live endpoint (Runpod API key needed; see Quick start for the no-key route)
@@ -64,6 +64,11 @@ The whole build, all tests and benchmarks cost **under $1** of GPU time.
 ## Quick start
 
 ### 1. Try the hosted app (no setup)
+
+| Library (images on the app's network volume) | How it works (request flow + glossary) |
+|---|---|
+| ![Library](docs/screenshots/library.jpg) | ![How it works](docs/screenshots/how-it-works.jpg) |
+
 Open the [live demo](https://t2jragqmgaorlq-3000.proxy.runpod.net), enter the access code, press
 **Generate**. Hover any ⓘ for a plain-language explanation; *How it works* explains every number.
 
