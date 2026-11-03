@@ -4,6 +4,11 @@
 # Prerequisites (Runpod console -> Secrets), referenced by name only:
 #   flux_demo_api_key       Runpod API key the app uses for /run, /status, /health
 #   flux_demo_access_code   passphrase visitors enter to generate
+#   anthropic_api_key       optional: Claude for agents, pipelines and the battle judge
+#                           (set USE_ANTHROPIC_SECRET=1 once it exists)
+#
+# Optional endpoint ids: RUNPOD_WAN_ENDPOINT_ID, RUNPOD_VIDEO_ENDPOINT_ID (video),
+# RUNPOD_LLM_ENDPOINT_ID + RUNPOD_LLM_MODEL (open-model agents, scripts/deploy_llm.sh).
 #
 #   export RUNPOD_API_KEY=...            # your key, only to call the pods API
 #   export RUNPOD_IMAGE_ENDPOINT_ID=...
@@ -42,8 +47,13 @@ print(json.dumps({
         "RUNPOD_API_KEY": "{{ RUNPOD_SECRET_flux_demo_api_key }}",
         "DEMO_ACCESS_CODE": "{{ RUNPOD_SECRET_flux_demo_access_code }}",
         "RUNPOD_IMAGE_ENDPOINT_ID": os.environ["RUNPOD_IMAGE_ENDPOINT_ID"],
-        # Optional: enables Animate (LTX-2.5 image-to-video).
+        # Optional: enable Animate (Wan 2.2 and/or LTX-2.5 image-to-video).
+        "RUNPOD_WAN_ENDPOINT_ID": os.environ.get("RUNPOD_WAN_ENDPOINT_ID", ""),
         "RUNPOD_VIDEO_ENDPOINT_ID": os.environ.get("RUNPOD_VIDEO_ENDPOINT_ID", ""),
+        # Optional: open-model agents on a Runpod vLLM endpoint.
+        "RUNPOD_LLM_ENDPOINT_ID": os.environ.get("RUNPOD_LLM_ENDPOINT_ID", ""),
+        "RUNPOD_LLM_MODEL": os.environ.get("RUNPOD_LLM_MODEL", "Qwen/Qwen3-8B"),
+        **({"ANTHROPIC_API_KEY": "{{ RUNPOD_SECRET_anthropic_api_key }}"} if os.environ.get("USE_ANTHROPIC_SECRET") == "1" else {}),
         "VIDEO_DAILY_CAP": "20",
         "DATA_DIR": "/workspace/flux-app",
         "DAILY_JOB_CAP": "100",
