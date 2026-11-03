@@ -75,3 +75,10 @@ input[type="range"] {
     display: none;
   }
 }
+
+/* Pipeline graph: edges into a running step "flow". */
+@keyframes dash {
+  to {
+    stroke-dashoffset: -20;
+  }
+}

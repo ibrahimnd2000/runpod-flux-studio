@@ -8,7 +8,7 @@ const nextConfig: NextConfig = {
   // deploy. Pages are tiny; always revalidate them. Hashed /_next/static assets
   // stay immutable.
   async headers() {
-    return ["/", "/library", "/about"].map((source) => ({
+    return ["/", "/library", "/about", "/pipelines", "/agent", "/battle"].map((source) => ({
       source,
       headers: [{ key: "Cache-Control", value: "public, max-age=0, must-revalidate" }],
     }));

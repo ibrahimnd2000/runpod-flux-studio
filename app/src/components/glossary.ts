@@ -47,6 +47,21 @@ export const GLOSSARY = {
   audio: "LTX-2.5 generates a matching soundtrack (ambience, effects) together with the video.",
   videoColdStart:
     "Video models are big (Wan 2.2: 34 GB, LTX-2.5: 72 GB). A worker that isn't warm has to load the model first, which can take minutes. Later clips on the same worker start right away.",
+  pipeline:
+    "A fixed recipe of steps. Each step starts as soon as the steps it reads from are done, so independent branches run at the same time. Same shape every run, so cost is predictable.",
+  fanout: "One step turns a list into one GPU job per item, all sent at once, so they render in parallel on separate workers.",
+  stepRef: "Use {{input.key}} for an input, {{steps.id}} for an earlier step's output, {{steps.id.prompt}} for the prompt of its image, and {{item}} inside a fan-out step.",
+  agent:
+    "An LLM that decides what to do: it plans, calls tools (which start real GPU jobs), reads the results and repeats until it delivers. Every step is shown in the trace.",
+  toolCall: "The model asks the app to run a function, here generate_images, animate_image and so on. The app runs it, checks the budget, and sends the result back.",
+  persona: "Extra instructions in the system prompt. Same model, different behaviour: frugal reuses and drafts, perfectionist explores and refines.",
+  budget:
+    "Hard limits for one run: dollars (GPU + LLM tokens), images, clips and turns. A tool call that would exceed them is refused, and the agent has to adapt.",
+  dryRun: "Runs the whole flow, including the LLM, but GPU tools return placeholder images priced at the measured averages. No GPU is used.",
+  llmCost:
+    "Claude: tokens × Anthropic's list price. Runpod vLLM: GPU-seconds × the GPU's price, an estimate because the worker bills time, not tokens.",
+  judge: "Claude Opus 5.5 looks at both deliveries (the actual images) plus what each agent spent, and scores brief fit, quality and efficiency.",
+  elo: "Chess-style rating: beating a higher-rated contestant gains more points. Everyone starts at 1000. Your vote overrides the judge.",
 } as const;
 
 export type GlossaryKey = keyof typeof GLOSSARY;
