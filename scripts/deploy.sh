@@ -11,8 +11,9 @@ set -euo pipefail
 IMAGE="${IMAGE:-docker.io/ibrahimnd2000/flux-worker:v0.1.0}"
 : "${REGISTRY_AUTH_ID:?set REGISTRY_AUTH_ID (runpodctl registry list)}"
 
-# 48 GB: BF16 FLUX.1-dev fits without CPU offloading. runpodctl takes one GPU type
-# (or a pool ID from GET /v2/catalog/gpus); fallback GPU types can be added in the console.
+# 48 GB: BF16 FLUX.1-dev fits without CPU offloading. Runpod resolves "NVIDIA L40S"
+# to its serverless pool ADA_48_PRO (L40 / L40S / RTX 6000 Ada), so workers can land
+# on any of those at the same price.
 GPU_ID="${GPU_ID:-NVIDIA L40S}"
 WORKERS_MIN="${WORKERS_MIN:-0}"     # scale to zero for the demo
 WORKERS_MAX="${WORKERS_MAX:-1}"
