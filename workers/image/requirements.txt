@@ -6,6 +6,5 @@ accelerate==1.15.0
 sentencepiece==0.2.2
 protobuf==7.36.2
 huggingface_hub==2.4.0
-hf_transfer==0.1.9
 pillow==13.0.0
 torchao==0.18.0
