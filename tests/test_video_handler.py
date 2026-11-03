@@ -128,3 +128,66 @@ def test_wan_steps_clamped_and_audio_request_noted(monkeypatch):
     assert out["params"]["steps"] == 50 and out["params"]["audio"] is False
     assert any("audio isn't supported" in n for n in out["notes"])
     assert any("steps clamped" in n for n in out["notes"])
+
+
+def test_image_url_must_be_https_and_downloads(monkeypatch):
+    out = run(image="http://example.com/a.jpg")
+    assert "https" in out["error"]
+
+    jpeg = base64.b64decode(image_b64(data_uri=False))
+
+    class Resp(io.BytesIO):
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    monkeypatch.setattr(handler.urllib.request, "urlopen", lambda url, timeout: Resp(jpeg))
+    out = run(image="https://example.com/a.jpg")
+    assert "error" not in out
+    assert out["params"]["width"] > out["params"]["height"]  # 640x480 source stays landscape
+
+
+def test_image_download_failure_and_oversize(monkeypatch):
+    def boom(url, timeout):
+        raise OSError("connection refused")
+
+    monkeypatch.setattr(handler.urllib.request, "urlopen", boom)
+    assert "could not download" in run(image="https://example.com/a.jpg")["error"]
+    monkeypatch.setattr(handler, "MAX_IMAGE_BYTES", 10)
+    assert "larger than" in run()["error"]
+
+
+def test_undecodable_image_is_an_input_error():
+    junk = base64.b64encode(b"definitely not an image").decode()
+    assert "decoded" in run(image=junk)["error"]
+
+
+def test_progress_updates_are_throttled_and_end_on_last_step(monkeypatch):
+    sent = []
+    monkeypatch.setattr(handler, "WORKER_ID", "pod-1")
+    monkeypatch.setattr(handler.runpod.serverless, "progress_update", lambda job, p: sent.append(p))
+    report = handler.make_progress_reporter({"id": "j"})
+    for step in range(1, 31):
+        report(step, 30)
+    # Steps arrive faster than the 1 s interval: the first and the last are sent.
+    assert sent[0] == {"step": 1, "total_steps": 30}
+    assert sent[-1] == {"step": 30, "total_steps": 30}
+    assert len(sent) == 2
+
+
+def test_no_progress_updates_outside_runpod(monkeypatch):
+    sent = []
+    monkeypatch.setattr(handler, "WORKER_ID", None)
+    monkeypatch.setattr(handler.runpod.serverless, "progress_update", lambda job, p: sent.append(p))
+    handler.make_progress_reporter({"id": "j"})(30, 30)
+    assert sent == []
+
+
+def test_result_reports_worker_and_timings():
+    out = run(num_frames=9)
+    assert out["mime_type"] == "video/mp4"
+    assert set(out["timings"]) >= {"inference_ms", "encode_ms", "total_ms"}
+    assert out["worker"]["gpu"] == "mock"
+    assert base64.b64decode(out["video"])[4:8] == b"ftyp"
