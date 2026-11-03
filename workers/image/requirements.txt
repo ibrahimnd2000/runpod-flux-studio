@@ -1,0 +1,11 @@
+# torch comes from the base image (see Dockerfile); these pins are re-verified at image build time.
+runpod==2.0.0
+diffusers==0.42.1
+transformers==5.22.1
+accelerate==1.15.0
+sentencepiece==0.2.2
+protobuf==7.36.2
+huggingface_hub==2.4.0
+hf_transfer==0.1.9
+pillow==13.0.0
+torchao==0.18.0

@@ -1,0 +1,26 @@
+# Secrets
+.env
+.env.*
+!.env.example
+*.pem
+hf_token*
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Runpod SDK local-mode artifacts
+simulated_uploaded/
+local_upload/
+
+# Node
+node_modules/
+.next/
+
+# Outputs
+out/
+*.mp4
+bench/results/*.raw.json
+.DS_Store

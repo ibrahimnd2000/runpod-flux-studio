@@ -1,0 +1,9 @@
+{
+  "input": {
+    "prompt": "A studio product photo of a ceramic coffee mug on a walnut table, soft morning light, shallow depth of field",
+    "width": 512,
+    "height": 512,
+    "num_inference_steps": 8,
+    "seed": 42
+  }
+}
