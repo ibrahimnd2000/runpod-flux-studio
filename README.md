@@ -3,8 +3,10 @@
 [![CI](https://github.com/ibrahimnd2000/runpod-flux-studio/actions/workflows/ci.yml/badge.svg)](https://github.com/ibrahimnd2000/runpod-flux-studio/actions/workflows/ci.yml)
 
 Text → product image with **FLUX.1-dev** on a **Runpod Serverless** GPU endpoint, plus a web app that shows,
-for every request, where the time and money went (queue, cold start, GPU time, cost per image), and a second
-endpoint that animates images into short clips with **LTX-2.5**.
+for every request, where the time and money went (queue, cold start, GPU time, cost per image), video
+endpoints that animate images into short clips (**Wan 2.2** and **LTX-2.5**), and an orchestration layer:
+**pipelines**, **tool-calling agents** and an **agent battleground** that drive those endpoints, with the agents
+running on Claude or on an open model served from a **Runpod vLLM endpoint**.
 
 **Live demo:** https://t2jragqmgaorlq-3000.proxy.runpod.net (generating needs the access code sent with the submission)
 
@@ -27,11 +29,13 @@ curl -s -X POST https://api.runpod.ai/v2/y6hj5mx4y5b2su/runsync \
 
 **Extras** (beyond the brief, built on top of it): measured benchmarks and a cold-start study; a hosted Next.js
 app on a Runpod CPU pod (single and parallel bulk generation, live endpoint dashboards, a media library on a
-network volume, beginner tooltips); a second Serverless endpoint for image → video with LTX-2.5 using Runpod
-model caching (deployed; first measured clip pending, see [Video](#video-image--clip-with-ltx-25)); CI.
+network volume, beginner tooltips); image → video endpoints with Wan 2.2 and LTX-2.5 using Runpod model caching
+(see [Video](#video-image--clip-with-wan-22-and-ltx-25)); pipelines, agents and a battleground on top of all of it
+(see [Orchestration](#orchestration-pipelines-agents-battleground)); 126 automated tests in CI.
 
 ## Contents
-[Results](#results) · [Quick start](#quick-start) · [API](#api) · [Video](#video-image--clip-with-ltx-25) ·
+[Results](#results) · [Quick start](#quick-start) · [API](#api) · [Video](#video-image--clip-with-wan-22-and-ltx-25) ·
+[Orchestration](#orchestration-pipelines-agents-battleground) ·
 [Architecture](#architecture) · [Design decisions](#design-decisions) · [Platform notes](#platform-notes) ·
 [Cost and business case](#cost-and-business-case) · [Limitations and next steps](#limitations-and-next-steps) ·
 [Repository](#repository)
@@ -101,7 +105,8 @@ set `RUNPOD_API_KEY` and `ENDPOINT_ID`; *Run sync* renders the image in the resp
 ### 3. Run the worker locally (no GPU, no credits)
 ```bash
 python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
-.venv/bin/ruff check . && .venv/bin/pytest -q              # what CI runs
+.venv/bin/ruff check . && .venv/bin/pytest -q              # what CI runs (31 worker/bench tests)
+(cd app && npm ci && npm test)                              # 95 app tests: fake Runpod + Anthropic, no keys
 
 cd workers/image
 MOCK_PIPELINE=1 ../../.venv/bin/python handler.py          # one job from test_input.json (SDK local mode)
@@ -116,8 +121,9 @@ cd app && npm ci
 set -a; source ../.env; set +a                 # RUNPOD_API_KEY + endpoint ids (server-side only)
 DEMO_ACCESS_CODE=pick-one npm run build && DEMO_ACCESS_CODE=pick-one npm start   # http://localhost:3000
 ```
-Without `DEMO_ACCESS_CODE` the dashboards work but generating is disabled (fail closed). Without
-`RUNPOD_VIDEO_ENDPOINT_ID` the Animate button is hidden.
+Without `DEMO_ACCESS_CODE` the dashboards work but generating is disabled (fail closed). Without a video
+endpoint id the Animate button is hidden. Without `RUNPOD_IMAGE_ENDPOINT_ID`, Pipelines / Agent / Battleground
+run as dry runs (placeholder images, the scripted model), so the orchestration UI works with no keys at all.
 
 ### 5. Build and deploy your own
 ```bash
@@ -164,34 +170,90 @@ FLUX.1-dev is guidance-distilled (no classifier-free guidance), so there is no n
 The `worker` block is what makes cold starts and GPU placement visible per request. While a job runs,
 `/status` returns `output: {"step": 14, "total_steps": 28}` from `runpod.serverless.progress_update`.
 
-## Video: image → clip with LTX-2.5
+## Video: image → clip with Wan 2.2 and LTX-2.5
 
-A second Serverless endpoint (`ni76to0oacpj7o`, [`workers/video/`](workers/video)) turns an image, typically a
-FLUX output, plus a motion prompt into an MP4 with audio, using Lightricks **LTX-2.5** (22B, distilled 8-step
-schedule) through diffusers' `LTX2ImageToVideoPipeline`. In the app it's the **Animate** button on any image.
+One worker image ([`workers/video/`](workers/video)), two model families selected by `VIDEO_MODEL`, two
+Serverless endpoints. It turns an image, typically a FLUX output, plus a motion prompt into an MP4. In the app
+it's the **Animate** button on any image, with a model picker.
+
+| Endpoint | Model | GPUs | Notes |
+|---|---|---|---|
+| `wrebsusdyaz9b5` | **Wan 2.2 TI2V-5B** (`WanImageToVideoPipeline`) | 48 GB pools (same as FLUX) | silent; keeps the input's aspect ratio at the target pixel area |
+| `ni76to0oacpj7o` | **LTX-2.5** (22B, distilled 8-step, `LTX2ImageToVideoPipeline`) | 80 GB pools (A100, H100) | generates a soundtrack with the video |
 
 | Input | Default | Rules |
 |---|---|---|
 | `image` | required | https URL, data URI or base64; ≤ 8 MB (Runpod's `/run` limit is 10 MB) |
 | `prompt` | required | the motion, e.g. "slow push-in, steam rising" |
-| `resolution` | `540p` | `540p` (960×544) or `720p` (1280×704); portrait images give portrait clips |
+| `resolution` | `540p` | `540p` or `720p`; LTX uses 960×544 / 1280×704 (swapped for portrait), Wan the same pixel area at the image's aspect |
 | `num_frames` | 121 | snapped to 8k+1 within 9–241 (121 ≈ 5 s at 24 fps) |
-| `fps` · `audio` · `seed` | 24 · true · random | |
+| `fps` · `audio` · `seed` · `steps` | 24 · LTX only · random · Wan 30 | |
 
 Output: `video` (base64 MP4), `bytes`, `seed`, `timings`, and the same `worker` block as the image worker. The
 handler refuses results over 15 MB of base64, because Runpod doesn't document a result-size limit.
 
-**How it's deployed.** The weights are ~72 GB (transformer 38 GB, Gemma 4 text encoder 24 GB, connectors 6 GB),
-far too big to bake into an image sensibly, so this endpoint uses **Runpod model caching**: the image is 8 GB
-(code and dependencies only) and Runpod places the weights on hosts itself, without billing the download. The
-repo is gated, so the endpoint was created in the console with the Hugging Face token as a **Runpod Secret**
-(details in [Platform notes](#platform-notes) and [`scripts/deploy_video.sh`](scripts/deploy_video.sh)). GPUs:
-80 GB pools (A100 $2.72/h, H100 $5.39/h). diffusers is pinned to a `main` commit (LTX-2.5 isn't in a release
-yet); CI builds the image's `check` stage, which imports the real pipeline and the Gemma 4 encoder.
+**Measured** (one clip each, 3–4 Nov 2026, so single samples, not benchmarks):
 
-**Status:** deployed and verified up to the model mount. The first request was still waiting on Runpod placing
-the weights when this was written; measured clip times and cost will be added here, from raw results, once it
-completes. No video numbers are claimed before then.
+| 2 s clip (49 frames, 24 fps), 540p | Wan 2.2 TI2V-5B | LTX-2.5 |
+|---|---|---|
+| Output | 736×736 H.264, silent | 960×544 H.264 + AAC audio |
+| GPU | RTX 6000 Ada | H100 80GB HBM3 |
+| GPU time (`executionTime`) | **87.2 s** (86.1 s inference, 30 steps) | **108.4 s** (92.0 s inference, 15.7 s encode) |
+| Cost | **$0.042** | **$0.162** |
+| Peak VRAM | 13.8 GB | 45.9 GB |
+| Wait before it started (`delayTime`) | 183 s: first worker on the endpoint, model already placed | **69 min**: queued for 80 GB GPU capacity |
+
+That last row decided the default. LTX-2.5 looks better and has sound, but it needs 80 GB GPUs that were scarce
+that evening, so a user would have waited over an hour. Wan 2.2 runs on the same plentiful 48 GB pools as FLUX
+at a quarter of the cost per clip, so the app offers Wan first and LTX as the premium option.
+
+**How it's deployed.** The weights are big (Wan 2.2 ~34 GB, LTX-2.5 ~72 GB), so these endpoints use **Runpod
+model caching**: the image is 8 GB (code and dependencies only) and Runpod places the weights on hosts itself,
+without billing the download. Wan isn't gated and deploys from the CLI
+([`scripts/deploy_video_wan.sh`](scripts/deploy_video_wan.sh)); LTX-2.5 is gated, so that endpoint was created in
+the console with the Hugging Face token as a **Runpod Secret** ([`scripts/deploy_video.sh`](scripts/deploy_video.sh)).
+diffusers is pinned to a `main` commit (LTX-2.5 isn't in a release yet); CI builds the image's `check` stage,
+which imports both real pipelines and the Gemma 4 encoder.
+
+## Orchestration: pipelines, agents, battleground
+
+Three pages in the app compose the endpoints above into bigger jobs. Everything runs **server-side** in the app
+pod (closing the tab doesn't stop a run) and streams a trace to the browser: every LLM turn, tool call, GPU job,
+second and cent.
+
+- **Pipelines** (`/pipelines`): a recipe of steps whose dependencies form a DAG. A step starts as soon as the
+  steps it reads are done, so independent branches run in parallel, and a *fan-out* step turns a list into one
+  GPU job per item. Templates: **Product launch kit** (LLM writes 4 shot ideas → FLUX renders them in parallel →
+  an LLM picks the hero shot, looking at the images when it can → Wan animates it *while* the launch copy is
+  written), **Style explorer** and **Storyboard**. Steps are editable in the UI or as JSON; a live graph shows
+  each step's state, time and cost.
+- **Agent** (`/agent`): an LLM gets a brief, a budget and seven tools (`generate_images` in parallel at draft or
+  final quality, `animate_image`, `view_image` for models that can see, `search_library`, `check_endpoints`,
+  `estimate_cost`, `finish`). The app enforces the budget (dollars for GPU + tokens, images, clips, turns): a call
+  that would exceed it comes back as a tool error, and the agent has to adapt. Personas (balanced, frugal,
+  perfectionist) change behaviour on the same model.
+- **Battleground** (`/battle`): two agents, the same brief and budget, at the same time. A Claude judge
+  scores both deliveries (it sees the images, plus what each agent spent); a person can overrule it. Results feed
+  an Elo leaderboard per model + persona.
+
+**Which LLM.** Agents can run on **Claude** (Opus 5.5, Sonnet 5.5, Haiku 5.5, via the Anthropic SDK; the strongest
+tool use, and vision) or on **Qwen3-8B on a Runpod Serverless vLLM endpoint** (`gdk2e7i6wa5zto`, Runpod's
+`worker-v1-vllm` image, OpenAI-compatible route with tool calling, 24 GB GPUs, scale to zero,
+[`scripts/deploy_llm.sh`](scripts/deploy_llm.sh)). That puts three kinds of Runpod workload in one demo: image
+generation, video generation and LLM inference. A scripted no-LLM baseline is always available, so the whole
+flow works without any key, and a **dry run** replaces GPU jobs with placeholders priced at the measured costs.
+
+**Measured** (4 Nov 2026, real endpoints, single runs):
+
+| Run | Result |
+|---|---|
+| Qwen3-8B tool call (direct) | correct `generate_images` call with both prompts; **1.3 s** GPU time warm, **211 s** first request (model placement + cold start) |
+| Agent, Qwen3-8B, *frugal* persona, one-image brief | searched the library first, rendered **1 draft image**, finished in 3 turns (172 s wall, including the LLM cold start): **$0.0035 GPU** + $0.027 LLM (estimate: GPU-seconds, mostly the LLM cold start) |
+| Pipeline *Product launch kit*, Qwen3-8B | all 5 steps done: 4 FLUX images in parallel (**$0.038**, 155 s including a FLUX cold start), hero picked from the prompts (Qwen can't see images), copy written while Wan animated the hero (2 s clip, **$0.038**). Total **$0.076 GPU** + $0.028 LLM (estimate); 12 min wall, most of it the clip waiting for a throttled Wan host |
+
+Claude-driven runs and judged battles need the deployment's access code and are run from the hosted app; their
+numbers aren't claimed here yet. Costs are labelled honestly in the UI: Claude tokens are metered at list price,
+vLLM time is an estimate (GPU-seconds × the pool's price).
 
 ## Architecture
 
@@ -203,9 +265,11 @@ flowchart LR
     Q --> W["GPU workers: handler.py + FLUX.1-dev BF16<br/>48 GB: L40 · L40S · 6000 Ada · A40 · A6000"]
     A --- V[("Network volume<br/>history + image/video library")]
     R[(Private Docker Hub<br/>30.6 GB image)] -.->|pull per new host| W
-    A -->|"Animate: /run · /status"| VQ[[Video endpoint queue]]
-    VQ --> VW["GPU workers: LTX-2.5 image → video<br/>80 GB: A100 · H100"]
-    MC[(Runpod model cache<br/>LTX-2.5 72 GB)] -.->|mounted on host| VW
+    A -->|"Animate: /run · /status"| VQ[[Video endpoint queues]]
+    VQ --> VW["GPU workers: Wan 2.2 (48 GB) · LTX-2.5 (80 GB)<br/>image → video"]
+    MC[(Runpod model cache<br/>Wan 2.2 · LTX-2.5)] -.->|mounted on host| VW
+    A -->|"agents: OpenAI route + tools"| LQ[[vLLM endpoint<br/>Qwen3-8B, 24 GB]]
+    A -->|"agents + judge"| AN[Anthropic API<br/>Claude]
 ```
 Request flow, image layers and the full diagram: [`docs/architecture.md`](docs/architecture.md).
 
@@ -270,6 +334,17 @@ before its first job. Runpod model caching keeps the image at 8 GB and moves the
 path. The trade-off: the first placement on a host is slow and opaque (no progress API), and the endpoint has to
 be created where Runpod can hold a token for the gated repo.
 
+**12. The app runs the agent loop, not the model provider.** Agents call the app's own functions (the same code
+paths, limits and library as the Studio), so the app can enforce budgets per call, count agent jobs against the
+demo's daily caps, and show one trace whichever LLM is driving. Each provider adapter keeps its own native,
+append-only history (Anthropic messages for Claude, OpenAI messages for vLLM) rather than translating one
+format into the other.
+
+**13. An open model on Runpod next to Claude.** Claude is the stronger agent and can look at images, but the
+battleground's point is the comparison: Qwen3-8B on a 24 GB serverless GPU costs fractions of a cent per turn
+once warm, and scales to zero. Seeing both on the same brief, budget and endpoints, scored side by side, is
+the useful result.
+
 ## Platform notes
 
 Things found while deploying, worth knowing for anyone building on Runpod (all hit and fixed in this repo):
@@ -293,6 +368,18 @@ Things found while deploying, worth knowing for anyone building on Runpod (all h
   already-cached URL could only be escaped with a new pod.
 - **CPU pods don't get a pod volume** (`volumeInGb` was ignored); the app's history and library use a network
   volume instead.
+- **FlashBoot can resume a worker on the old image.** After a template moved to a fixed image (v0.2.1), two jobs
+  still ran on a FlashBoot-resumed v0.2.0 worker. What worked: FlashBoot off, max workers 0 until `/health`
+  showed no workers, then max 1 and FlashBoot back on. The REST v2 value is `"flashboot": "FLASHBOOT"`
+  (`OFF | FLASHBOOT | PRIORITY_FLASHBOOT`), not `"ON"`.
+- **Right after un-pausing**, `/run` returns `409 ENDPOINT_PAUSED` for a few seconds; retry.
+- **Restricted API keys list endpoints explicitly.** The app's key (a Runpod Secret) was scoped to the endpoints
+  that existed when it was made, so a new endpoint answered `403 Forbidden` until the key's permissions were
+  extended. The app now names that cause in the error.
+- **Throttled workers.** A worker whose host has the model cached but whose GPU is busy with other customers shows
+  as `throttled`; jobs wait in the queue until it frees up or another host is used.
+- **Silent dependencies.** Wan's pipeline imports `ftfy` only when it runs; the first job failed with
+  `NameError`. The Dockerfile's `check` stage now imports it, so CI catches it.
 
 ## Cost and business case
 
@@ -314,8 +401,10 @@ image + clip + copy, and data control. For Runpod, this is recurring GPU spend t
 growth: 10,000 images a month is about **61 GPU-hours** at the measured 21.9 s per image (video multiplies that).
 
 ## Limitations and next steps
-- **Video numbers:** first clip, then a small benchmark (540p/720p, 2 s/5 s) for time and $/clip, and enable
-  *Animate* on the hosted app.
+- **Video benchmark:** one clip per model so far; next, a small benchmark (540p/720p, 2 s/5 s, warm vs cold) for
+  time and $/clip.
+- **Agents:** a fixed set of battle briefs run several times per contestant, so the leaderboard means something
+  statistically; Qwen3 with thinking on versus off; and an active LLM worker during demos to remove its cold start.
 - **Cold-start study:** the FLUX handler with Runpod model caching instead of baked weights; compare first-request
   times on fresh hosts against the 690 s / 93 s / 35 s measured here (the video endpoint is the first data point
   for caching).
@@ -331,13 +420,16 @@ growth: 10,000 images a month is about **61 GPU-hours** at the measured 21.9 s p
 ## Repository
 ```
 workers/image/     FLUX.1-dev Serverless worker: handler.py, Dockerfile (deps → check → weights → final)
-workers/video/     LTX-2.5 image-to-video worker: handler.py, Dockerfile (weights via Runpod model caching)
+workers/video/     Wan 2.2 / LTX-2.5 image-to-video worker: handler.py, Dockerfile (weights via model caching)
 tests/             image + video handler tests with mocked pipelines, benchmark report tests (run in CI)
+app/tests/         Vitest: limits, library, pipelines, tools + budgets, agent loop, Claude/vLLM adapters,
+                   battles + Elo, every API route against a fake Runpod API (run in CI)
 bench/             bench.py (Runpod delayTime/executionTime, cost), prices.yaml, raw results
-app/               Next.js 16 app: Studio, bulk, library, Animate, live endpoint dashboards; Dockerfile for a CPU pod
-scripts/           build_and_push.sh, deploy.sh (image endpoint), deploy_video.sh, deploy_app.sh (app pod),
+app/               Next.js 16 app: Studio, bulk, library, Animate, dashboards, Pipelines, Agent, Battleground
+scripts/           build_and_push.sh, deploy.sh (image endpoint), deploy_video.sh, deploy_video_wan.sh,
+                   deploy_llm.sh (vLLM agent endpoint), deploy_app.sh (app pod),
                    generate.sh, curl examples
 postman/           Postman collection: image runsync/run/status/errors/health, video run/status/errors/health
 docs/              architecture, benchmarks, example requests/responses, screenshots
-.github/workflows  CI: ruff, pytest, hadolint + check-stage builds of both worker images, app lint/typecheck/build
+.github/workflows  CI: ruff, pytest, hadolint + check-stage builds of both worker images, app lint/typecheck/test/build
 ```
