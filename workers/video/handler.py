@@ -1,5 +1,8 @@
 """
-Runpod Serverless worker: LTX-2.5 (distilled) image-to-video with audio.
+Runpod Serverless worker: image-to-video. One image, two model families
+(VIDEO_MODEL), one endpoint per family:
+  ltx2   Lightricks LTX-2.5 distilled (22B), with audio, 80 GB GPUs
+  wan22  Wan 2.2 TI2V-5B (Apache-2.0), no audio, fits 48 GB GPUs
 
 Weights come from Runpod model caching (endpoint "Cached model" setting). Runpod
 mounts the snapshot at /runpod/model-store/huggingface/<org>/<name>/<revision>
@@ -9,11 +12,13 @@ and the 72 GB of weights never travel through a registry. The pipeline is loaded
 once at import time; warm requests reuse it.
 
 Environment:
-  MODEL_ID         Hugging Face repo id (default Lightricks/LTX-2.5-Diffusers)
+  VIDEO_MODEL      "ltx2" (default) or "wan22"
+  MODEL_ID         Hugging Face repo id (default per family)
   MODEL_PATH       explicit local snapshot directory (overrides the lookup below)
   MODEL_STORE_DIR  Runpod model store root (default /runpod/model-store/huggingface)
   MODEL_CACHE_DIR  Hugging Face cache layout root (default /runpod-volume/huggingface-cache/hub)
-  OFFLOAD          "model" (default: components move to the GPU only while used) or "none"
+  OFFLOAD          "model" (components move to the GPU only while used) or "none";
+                   default "model" for both families
   MAX_RESULT_MB    refuse results whose base64 MP4 exceeds this (default 15)
   MOCK_PIPELINE    "1" to skip torch/diffusers and return a synthetic clip (local/CPU tests)
 """
@@ -35,13 +40,21 @@ import runpod  # noqa: E402
 from runpod.serverless.utils.rp_validator import validate  # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-log = logging.getLogger("ltx-worker")
+log = logging.getLogger("video-worker")
 
-MODEL_ID = os.environ.get("MODEL_ID", "Lightricks/LTX-2.5-Diffusers")
+FAMILIES = {
+    "ltx2": {"model_id": "Lightricks/LTX-2.5-Diffusers", "offload": "model", "audio": True},
+    # Offload on 48 GB: weights are ~24 GB, but decoding 121 frames with the FP32 VAE needs headroom.
+    "wan22": {"model_id": "Wan-AI/Wan2.2-TI2V-5B-Diffusers", "offload": "model", "audio": False},
+}
+FAMILY = os.environ.get("VIDEO_MODEL", "ltx2").lower()
+if FAMILY not in FAMILIES:
+    raise SystemExit(f"VIDEO_MODEL must be one of {', '.join(FAMILIES)}")
+MODEL_ID = os.environ.get("MODEL_ID", FAMILIES[FAMILY]["model_id"])
 MODEL_PATH = os.environ.get("MODEL_PATH", "")
 MODEL_STORE_DIR = os.environ.get("MODEL_STORE_DIR", "/runpod/model-store/huggingface")
 MODEL_CACHE_DIR = os.environ.get("MODEL_CACHE_DIR", "/runpod-volume/huggingface-cache/hub")
-OFFLOAD = os.environ.get("OFFLOAD", "model").lower()
+OFFLOAD = os.environ.get("OFFLOAD", FAMILIES[FAMILY]["offload"]).lower()
 MAX_RESULT_MB = float(os.environ.get("MAX_RESULT_MB", "15"))
 MOCK_PIPELINE = os.environ.get("MOCK_PIPELINE", "0") == "1"
 WORKER_ID = os.environ.get("RUNPOD_POD_ID")
@@ -51,8 +64,11 @@ MAX_PROMPT_CHARS = 1000
 MAX_IMAGE_BYTES = 8 * 2**20  # /run accepts 10 MB in total
 MAX_SEED = 2**32 - 1
 MIN_FRAMES, MAX_FRAMES = 9, 241  # 241 frames = 10 s at 24 fps
-# Landscape sizes; portrait inputs get width and height swapped. Divisible by 32.
+# Landscape sizes; portrait inputs get width and height swapped (LTX), or the same
+# pixel area at the input's aspect ratio (Wan). Divisible by 32.
 RESOLUTIONS = {"540p": (960, 544), "720p": (1280, 704)}
+WAN_DEFAULT_STEPS, MIN_STEPS, MAX_STEPS = 30, 10, 50
+WAN_NEGATIVE = "blurry, low quality, distorted, jittery, static, watermark, text, deformed"
 
 INPUT_SCHEMA = {
     "image": {"type": str, "required": True},
@@ -61,7 +77,8 @@ INPUT_SCHEMA = {
     "num_frames": {"type": int, "required": False, "default": 121},
     "fps": {"type": int, "required": False, "default": 24},
     "seed": {"type": int, "required": False, "default": None},
-    "audio": {"type": bool, "required": False, "default": True},
+    "audio": {"type": bool, "required": False, "default": None},
+    "steps": {"type": int, "required": False, "default": None},
 }
 
 
@@ -98,7 +115,46 @@ def resolve_model_path(model_id: str, store_dir: str, cache_dir: str, explicit: 
     return model_id
 
 
-class LTXBackend:
+class _TorchBackend:
+    """Shared GPU bookkeeping and MP4 encoding."""
+
+    audio_rate = None
+
+    def _finish_load(self, t0: float, path: str):
+        self.pipe.set_progress_bar_config(disable=True)
+        self.load_ms = (time.perf_counter() - t0) * 1000
+        props = self.torch.cuda.get_device_properties(0)
+        self.device = {"gpu": props.name, "vram_total_gb": round(props.total_memory / 2**30, 1)}
+        log.info(
+            "Loaded %s from %s on %s in %.1fs (offload=%s)", MODEL_ID, path, props.name, self.load_ms / 1000, OFFLOAD
+        )
+
+    def _place(self):
+        if OFFLOAD == "model":
+            self.pipe.enable_model_cpu_offload()
+        else:
+            self.pipe.to("cuda")
+
+    def encode(self, frames, audio, fps: int) -> bytes:
+        from diffusers.utils import encode_video
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "clip.mp4")
+            encode_video(
+                frames,
+                fps=fps,
+                output_path=path,
+                audio=audio,
+                audio_sample_rate=self.audio_rate if audio is not None else None,
+            )
+            with open(path, "rb") as f:
+                return f.read()
+
+    def peak_vram_gb(self) -> float:
+        return round(self.torch.cuda.max_memory_allocated() / 2**30, 1)
+
+
+class LTXBackend(_TorchBackend):
     """diffusers LTX2ImageToVideoPipeline, distilled 8-step schedule, on one CUDA GPU."""
 
     def __init__(self, model_id: str):
@@ -111,19 +167,10 @@ class LTXBackend:
         path = resolve_model_path(model_id, MODEL_STORE_DIR, MODEL_CACHE_DIR, MODEL_PATH)
         t0 = time.perf_counter()
         self.pipe = LTX2ImageToVideoPipeline.from_pretrained(path, torch_dtype=torch.bfloat16)
-        if OFFLOAD == "model":
-            self.pipe.enable_model_cpu_offload()
-        else:
-            self.pipe.to("cuda")
+        self._place()
         self.pipe.vae.enable_tiling()
-        self.pipe.set_progress_bar_config(disable=True)
-        self.load_ms = (time.perf_counter() - t0) * 1000
-        props = torch.cuda.get_device_properties(0)
-        self.device = {"gpu": props.name, "vram_total_gb": round(props.total_memory / 2**30, 1)}
         self.audio_rate = self.pipe.vocoder.config.output_sampling_rate
-        log.info(
-            "Loaded %s from %s on %s in %.1fs (offload=%s)", model_id, path, props.name, self.load_ms / 1000, OFFLOAD
-        )
+        self._finish_load(t0, path)
 
     def generate(self, p: dict, image, on_step=None):
         def callback(pipe, step, timestep, callback_kwargs):
@@ -150,23 +197,48 @@ class LTXBackend:
             )
         return video[0], (audio[0].float().cpu() if p["audio"] else None)
 
-    def encode(self, frames, audio, fps: int) -> bytes:
-        from diffusers.utils import encode_video
 
-        with tempfile.TemporaryDirectory() as tmp:
-            path = os.path.join(tmp, "clip.mp4")
-            encode_video(
-                frames,
-                fps=fps,
-                output_path=path,
-                audio=audio,
-                audio_sample_rate=self.audio_rate if audio is not None else None,
+class WanBackend(_TorchBackend):
+    """diffusers WanImageToVideoPipeline with Wan 2.2 TI2V-5B (expand_timesteps mode)."""
+
+    def __init__(self, model_id: str):
+        import torch
+        from diffusers import AutoencoderKLWan, WanImageToVideoPipeline
+
+        self.torch = torch
+        path = resolve_model_path(model_id, MODEL_STORE_DIR, MODEL_CACHE_DIR, MODEL_PATH)
+        t0 = time.perf_counter()
+        # Wan's VAE is recommended in float32; the transformer runs in BF16.
+        vae = AutoencoderKLWan.from_pretrained(path, subfolder="vae", torch_dtype=torch.float32)
+        self.pipe = WanImageToVideoPipeline.from_pretrained(path, vae=vae, torch_dtype=torch.bfloat16)
+        self._place()
+        if hasattr(self.pipe.vae, "enable_tiling"):
+            self.pipe.vae.enable_tiling()
+        self._finish_load(t0, path)
+
+    def generate(self, p: dict, image, on_step=None):
+        def callback(pipe, step, timestep, callback_kwargs):
+            if on_step:
+                on_step(step + 1, p["steps"])
+            return callback_kwargs
+
+        self.torch.cuda.reset_peak_memory_stats()
+        generator = self.torch.Generator(device="cuda").manual_seed(p["seed"])
+        with self.torch.inference_mode():
+            out = self.pipe(
+                image=image,
+                prompt=p["prompt"],
+                negative_prompt=WAN_NEGATIVE,
+                width=p["width"],
+                height=p["height"],
+                num_frames=p["num_frames"],
+                num_inference_steps=p["steps"],
+                guidance_scale=5.0,
+                generator=generator,
+                output_type="np",
+                callback_on_step_end=callback,
             )
-            with open(path, "rb") as f:
-                return f.read()
-
-    def peak_vram_gb(self) -> float:
-        return round(self.torch.cuda.max_memory_allocated() / 2**30, 1)
+        return out.frames[0], None
 
 
 class MockBackend:
@@ -179,8 +251,8 @@ class MockBackend:
 
     def generate(self, p: dict, image, on_step=None):
         if on_step:
-            for step in range(1, 9):
-                on_step(step, 8)
+            for step in range(1, p["steps"] + 1):
+                on_step(step, p["steps"])
         return {"frames": p["num_frames"], "size": (p["width"], p["height"])}, None
 
     def encode(self, frames, audio, fps: int) -> bytes:
@@ -192,7 +264,21 @@ class MockBackend:
 
 
 def load_backend():
-    return MockBackend() if MOCK_PIPELINE else LTXBackend(MODEL_ID)
+    if MOCK_PIPELINE:
+        return MockBackend()
+    return {"ltx2": LTXBackend, "wan22": WanBackend}[FAMILY](MODEL_ID)
+
+
+def clip_size(image, resolution: str) -> tuple[int, int]:
+    """Output size: LTX uses fixed landscape/portrait sizes; Wan keeps the input's aspect ratio."""
+    w, h = RESOLUTIONS[resolution]
+    if FAMILY == "wan22":
+        area = w * h
+        aspect = image.width / image.height
+        w = max(32, round((area * aspect) ** 0.5 / 32) * 32)
+        h = max(32, round((area / aspect) ** 0.5 / 32) * 32)
+        return w, h
+    return (h, w) if image.height > image.width else (w, h)
 
 
 # --------------------------------------------------------------------------- #
@@ -264,10 +350,25 @@ def normalize_input(raw) -> tuple[dict, list, object]:
         notes.append(f"fps clamped from {p['fps']} to {fps}")
     p["fps"] = fps
 
+    supports_audio = FAMILIES[FAMILY]["audio"]
+    if p["audio"] is None:
+        p["audio"] = supports_audio
+    elif p["audio"] and not supports_audio:
+        notes.append(f"audio isn't supported by {FAMILY}; the clip is silent")
+        p["audio"] = False
+
+    if FAMILY == "wan22":
+        steps = WAN_DEFAULT_STEPS if p["steps"] is None else p["steps"]
+        p["steps"] = min(max(steps, MIN_STEPS), MAX_STEPS)
+        if p["steps"] != steps:
+            notes.append(f"steps clamped from {steps} to {p['steps']}")
+    else:
+        if p["steps"] is not None:
+            notes.append("steps ignored: the distilled LTX-2.5 schedule is fixed at 8")
+        p["steps"] = 8
+
     image = load_image(p.pop("image"))
-    w, h = RESOLUTIONS[p["resolution"]]
-    if image.height > image.width:  # portrait source -> portrait video
-        w, h = h, w
+    w, h = clip_size(image, p["resolution"])
     p["width"], p["height"] = w, h
     p["duration_s"] = round(p["num_frames"] / p["fps"], 2)
     return p, notes, image.resize((w, h))
@@ -345,7 +446,8 @@ def handler(job):
             "process_ready_s": round(READY_S, 2),
             "jobs_served": _jobs_served,
         },
-        "params": {k: v for k, v in p.items() if k != "prompt"} | {"model": MODEL_ID, "offload": OFFLOAD},
+        "params": {k: v for k, v in p.items() if k != "prompt"}
+        | {"model": MODEL_ID, "family": FAMILY, "offload": OFFLOAD},
     }
     if notes:
         response["notes"] = notes

@@ -104,3 +104,27 @@ def test_model_path_falls_back_to_hf_cache_layout_then_repo_id(tmp_path):
     (store / "Other" / "Model" / "rev").mkdir(parents=True)
     assert handler.resolve_model_path("Other/Model", str(store), str(cache)) == "Other/Model"
     assert handler.resolve_model_path(model, str(store), str(cache), explicit="/x") == "/x"
+
+
+def test_ltx_defaults_audio_on_and_fixed_steps():
+    out = run(steps=20)
+    assert out["params"]["audio"] is True and out["params"]["steps"] == 8
+    assert any("steps ignored" in n for n in out["notes"])
+
+
+def test_wan_keeps_aspect_ratio_and_defaults(monkeypatch):
+    monkeypatch.setattr(handler, "FAMILY", "wan22")
+    square = run(image=image_b64(512, 512))
+    p = square["params"]
+    assert (p["width"], p["height"]) == (736, 736)  # same pixel area as 960x544, square
+    assert p["width"] % 32 == 0 and p["steps"] == 30 and p["audio"] is False
+    landscape = run(image=image_b64(640, 480))["params"]
+    assert (landscape["width"], landscape["height"]) == (832, 640)
+
+
+def test_wan_steps_clamped_and_audio_request_noted(monkeypatch):
+    monkeypatch.setattr(handler, "FAMILY", "wan22")
+    out = run(steps=500, audio=True)
+    assert out["params"]["steps"] == 50 and out["params"]["audio"] is False
+    assert any("audio isn't supported" in n for n in out["notes"])
+    assert any("steps clamped" in n for n in out["notes"])
