@@ -1,0 +1,156 @@
+{
+  "info": {
+    "name": "Runpod FLUX.1-dev endpoint",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "description": "Set the collection variables RUNPOD_API_KEY and ENDPOINT_ID. /runsync returns the image inline (base64 PNG in output.images[0]); /run + /status is the async pattern for long jobs. The 'Run (async)' request stores the job id for 'Status'."
+  },
+  "variable": [
+    {
+      "key": "RUNPOD_API_KEY",
+      "value": ""
+    },
+    {
+      "key": "ENDPOINT_ID",
+      "value": ""
+    },
+    {
+      "key": "JOB_ID",
+      "value": ""
+    }
+  ],
+  "item": [
+    {
+      "name": "Run sync (prompt -> image)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{RUNPOD_API_KEY}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "https://api.runpod.ai/v2/{{ENDPOINT_ID}}/runsync",
+        "description": "Waits for the result. The response includes delayTime (queue + cold start) and executionTime in ms.",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"input\": {\n    \"prompt\": \"A studio product photo of a ceramic coffee mug on a walnut table, soft morning light, shallow depth of field\",\n    \"width\": 1024,\n    \"height\": 1024,\n    \"num_inference_steps\": 28,\n    \"guidance_scale\": 3.5,\n    \"seed\": 42\n  }\n}"
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const r = pm.response.json();",
+              "pm.test('completed', () => pm.expect(r.status).to.eql('COMPLETED'));",
+              "pm.test('has image + seed', () => { pm.expect(r.output.images).to.have.lengthOf.at.least(1); pm.expect(r.output.seed).to.be.a('number'); });",
+              "if (r.output && r.output.images) { pm.visualizer.set('<img style=\"max-width:100%\" src=\"data:image/png;base64,{{img}}\"/><p>seed {{seed}} | delay {{d}} ms | exec {{e}} ms</p>', {img: r.output.images[0], seed: r.output.seed, d: r.delayTime, e: r.executionTime}); }"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Run async",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{RUNPOD_API_KEY}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "https://api.runpod.ai/v2/{{ENDPOINT_ID}}/run",
+        "description": "Queues the job and returns its id immediately.",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"input\": {\n    \"prompt\": \"A studio product photo of a ceramic coffee mug on a walnut table, soft morning light, shallow depth of field\",\n    \"width\": 1024,\n    \"height\": 1024,\n    \"num_inference_steps\": 28,\n    \"guidance_scale\": 3.5,\n    \"seed\": 42\n  }\n}"
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const r = pm.response.json();",
+              "pm.collectionVariables.set('JOB_ID', r.id);",
+              "pm.test('queued', () => pm.expect(r.id).to.be.a('string'));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Status",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{RUNPOD_API_KEY}}"
+          }
+        ],
+        "url": "https://api.runpod.ai/v2/{{ENDPOINT_ID}}/status/{{JOB_ID}}",
+        "description": "Poll until status is COMPLETED or FAILED. Async results are kept for 30 minutes."
+      }
+    },
+    {
+      "name": "Bad input (expect FAILED)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{RUNPOD_API_KEY}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "https://api.runpod.ai/v2/{{ENDPOINT_ID}}/runsync",
+        "description": "Shows validation: the handler returns {error}, which Runpod reports as status FAILED.",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"input\": {\n    \"prompt\": \"\",\n    \"width\": 512\n  }\n}"
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const r = pm.response.json();",
+              "pm.test('validation error', () => { pm.expect(r.status).to.eql('FAILED'); pm.expect(r.error).to.include('prompt'); });"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Health",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{RUNPOD_API_KEY}}"
+          }
+        ],
+        "url": "https://api.runpod.ai/v2/{{ENDPOINT_ID}}/health",
+        "description": "Worker counts (idle/running/initializing) and job counts."
+      }
+    }
+  ]
+}
