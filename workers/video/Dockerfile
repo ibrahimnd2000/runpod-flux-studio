@@ -33,7 +33,7 @@ RUN python -c "import torch; print('torch==' + torch.__version__)" > /tmp/torch-
 # its Gemma 4 encoder, and Wan 2.2).
 FROM deps AS check
 COPY handler.py .
-RUN python -c "import diffusers, transformers, av; \
+RUN python -c "import diffusers, transformers, av, ftfy; \
 from diffusers import LTX2ImageToVideoPipeline; \
 from diffusers.pipelines.ltx2.utils import DISTILLED_SIGMA_VALUES; \
 from diffusers.utils import encode_video; \

@@ -8,4 +8,7 @@ sentencepiece==0.2.2
 protobuf==7.36.2
 huggingface_hub==2.4.0
 av==19.0.2
+# Wan 2.2 cleans prompts with ftfy; diffusers only imports it if present, so a
+# missing package fails at the first job, not at import.
+ftfy==6.3.1
 pillow==13.0.0
