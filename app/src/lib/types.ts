@@ -103,3 +103,23 @@ export interface HistoryView {
   };
   pricesChecked: string;
 }
+
+/** An image saved in the media library (the file itself is served by /api/media/[id]). */
+export interface MediaItem {
+  id: string;
+  createdAt: number;
+  prompt: string;
+  width: number;
+  height: number;
+  steps: number;
+  seed?: number;
+  gpu?: string;
+  executionMs?: number;
+  costUsd?: number;
+  bytes?: number;
+}
+
+export interface MediaView {
+  items: MediaItem[];
+  usage: { count: number; bytes: number; persistent: boolean };
+}

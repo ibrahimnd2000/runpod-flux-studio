@@ -13,9 +13,14 @@ export default function Home() {
             money went.
           </p>
         </div>
-        <Link href="/about" className="text-sm text-accent hover:underline">
-          How it works →
-        </Link>
+        <nav className="flex gap-4 text-sm">
+          <Link href="/library" className="text-accent hover:underline">
+            Media library
+          </Link>
+          <Link href="/about" className="text-accent hover:underline">
+            How it works →
+          </Link>
+        </nav>
       </header>
       <Dashboard />
     </main>

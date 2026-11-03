@@ -34,10 +34,16 @@ export function startOfUtcDay(now = Date.now()): number {
   return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
 }
 
+/** The access code alone: gates actions that change data but don't spend credits (e.g. deleting images). */
+export function checkCode(code: string | null) {
+  if (!config.accessCode) throw new LimitError("Changes are disabled on this deployment (no access code set).", 503);
+  if (!code || !codeMatches(code)) throw new LimitError("Wrong or missing access code.", 401);
+}
+
 /** Checks the access code and that `count` more images fit in the daily cap and the visitor's rate limit. */
 export function checkAccess(code: string | null, ip: string, count = 1) {
   if (!config.accessCode) throw new LimitError("Generation is disabled on this deployment (no access code set).", 503);
-  if (!code || !codeMatches(code)) throw new LimitError("Wrong or missing access code.", 401);
+  checkCode(code);
   const usedToday = submittedSince(startOfUtcDay());
   if (usedToday + count > config.dailyCap)
     throw new LimitError(

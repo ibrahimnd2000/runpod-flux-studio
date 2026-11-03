@@ -1,3 +1,4 @@
+import { saveImage } from "@/lib/media";
 import { requestCost } from "@/lib/prices";
 import { jobStatus } from "@/lib/runpod";
 import { finish, getPending, getRecord, isKnown } from "@/lib/store";
@@ -43,6 +44,21 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
       const { images, ...meta } = out as HandlerOutput;
       view.output = { ...meta, image: `data:image/jpeg;base64,${images[0]}` };
       view.costUsd = requestCost(meta.worker?.gpu, s.executionTime);
+      saveImage(
+        {
+          id,
+          createdAt: Date.now(),
+          prompt: pending.input.prompt,
+          width: pending.input.width,
+          height: pending.input.height,
+          steps: pending.input.num_inference_steps,
+          seed: meta.seed,
+          gpu: meta.worker?.gpu,
+          executionMs: s.executionTime,
+          costUsd: view.costUsd,
+        },
+        images[0],
+      );
       finish({ ...view, output: meta });
     } else {
       finish(view);
