@@ -7,17 +7,17 @@ import { TERMINAL, type GenerateInput, type JobView } from "@/lib/types";
 import { getJson, isTransient } from "./api";
 import JobDetails from "./JobDetails";
 import Notice from "./Notice";
+import { useAccessCode } from "./useAccessCode";
 
 type Problem = { tone: "warn" | "error"; title: string; detail?: string };
 
-const PRESETS = [
+export const PRESETS = [
   "A studio product photo of a ceramic coffee mug on a walnut table, soft morning light, shallow depth of field",
   "A pair of white running shoes on a concrete plinth, hard rim light, minimalist product shot",
   "A glass bottle of olive oil beside fresh rosemary on linen, overhead flat lay, natural light",
   "A leather backpack hanging on a wooden peg against a sage green wall, catalogue photo",
 ];
 
-const CODE_KEY = "flux-demo-access-code";
 // Keep polling through short outages (pod restart, proxy hiccup) for about a minute.
 const MAX_POLL_FAILURES = 60;
 
@@ -34,25 +34,19 @@ export default function GeneratePanel({ maxSide, maxSteps, onFinished }: {
     guidance_scale: 3.5,
   });
   const [seedText, setSeedText] = useState("");
-  const [code, setCode] = useState("");
+  const { code, setCode, remember } = useAccessCode();
   const [job, setJob] = useState<JobView | null>(null);
   const [image, setImage] = useState<string | null>(null);
   const [problem, setProblem] = useState<Problem | null>(null);
   const [busy, setBusy] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  useEffect(() => {
-    // Restore a remembered access code after hydration (localStorage is browser-only).
-    const restore = setTimeout(() => {
-      try {
-        setCode(localStorage.getItem(CODE_KEY) ?? "");
-      } catch {}
-    }, 0);
-    return () => {
-      clearTimeout(restore);
+  useEffect(
+    () => () => {
       if (timer.current) clearTimeout(timer.current);
-    };
-  }, []);
+    },
+    [],
+  );
 
   async function poll(id: string, failures = 0) {
     const res = await getJson<JobView>(`/api/jobs/${id}`);
@@ -102,9 +96,7 @@ export default function GeneratePanel({ maxSide, maxSteps, onFinished }: {
     setImage(null);
     setJob(null);
     setBusy(true);
-    try {
-      localStorage.setItem(CODE_KEY, code);
-    } catch {}
+    remember(code);
     const body = { ...form, seed: seedText === "" ? undefined : Number(seedText) };
     const res = await getJson<{ id: string; status: JobView["status"]; input: GenerateInput }>("/api/generate", {
       method: "POST",
@@ -133,8 +125,7 @@ export default function GeneratePanel({ maxSide, maxSteps, onFinished }: {
   const set = <K extends keyof GenerateInput>(k: K, v: GenerateInput[K]) => setForm((f) => ({ ...f, [k]: v }));
 
   return (
-    <section className="card">
-      <h2 className="card-title">Generate</h2>
+    <div>
       <form onSubmit={submit} className="space-y-3">
         <textarea
           className="input h-24 resize-none"
@@ -240,6 +231,6 @@ export default function GeneratePanel({ maxSide, maxSteps, onFinished }: {
           <JobDetails job={job} />
         </div>
       )}
-    </section>
+    </div>
   );
 }

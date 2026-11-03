@@ -34,13 +34,22 @@ export function startOfUtcDay(now = Date.now()): number {
   return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
 }
 
-export function checkAccess(code: string | null, ip: string) {
+/** Checks the access code and that `count` more images fit in the daily cap and the visitor's rate limit. */
+export function checkAccess(code: string | null, ip: string, count = 1) {
   if (!config.accessCode) throw new LimitError("Generation is disabled on this deployment (no access code set).", 503);
   if (!code || !codeMatches(code)) throw new LimitError("Wrong or missing access code.", 401);
-  if (submittedSince(startOfUtcDay()) >= config.dailyCap)
-    throw new LimitError(`Daily demo cap of ${config.dailyCap} images reached; resets at 00:00 UTC.`, 429);
-  if (submittedByIpSince(ip, Date.now() - 10 * 60_000) >= config.perIpPer10Min)
-    throw new LimitError(`Rate limit: ${config.perIpPer10Min} images per 10 minutes per visitor.`, 429);
+  const usedToday = submittedSince(startOfUtcDay());
+  if (usedToday + count > config.dailyCap)
+    throw new LimitError(
+      `Daily demo cap of ${config.dailyCap} images: ${Math.max(config.dailyCap - usedToday, 0)} left today (resets 00:00 UTC).`,
+      429,
+    );
+  const usedByIp = submittedByIpSince(ip, Date.now() - 10 * 60_000);
+  if (usedByIp + count > config.perIpPer10Min)
+    throw new LimitError(
+      `Rate limit: ${config.perIpPer10Min} images per 10 minutes per visitor; ${Math.max(config.perIpPer10Min - usedByIp, 0)} available now.`,
+      429,
+    );
 }
 
 const clamp = (v: unknown, lo: number, hi: number, fallback: number) => {

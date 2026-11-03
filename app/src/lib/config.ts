@@ -15,7 +15,9 @@ export const config = {
   // Empty code = generation disabled (fail closed); dashboards stay readable.
   accessCode: process.env.DEMO_ACCESS_CODE ?? "",
   dailyCap: int("DAILY_JOB_CAP", 100),
-  perIpPer10Min: int("RATE_LIMIT_PER_10_MIN", 6),
+  perIpPer10Min: int("RATE_LIMIT_PER_10_MIN", 12),
+  // Largest bulk run; every image in it counts against the limits above.
+  bulkMax: int("BULK_MAX", 8),
   maxSide: int("MAX_SIDE", 1024),
   maxSteps: int("MAX_STEPS", 28),
   // Job history survives restarts when this points at a persistent volume.

@@ -93,6 +93,13 @@ export interface HistoryView {
     avgCostUsd: number | null;
     totalCostUsd: number;
   };
-  limits: { dailyCap: number; usedToday: number; maxSide: number; maxSteps: number };
+  limits: {
+    dailyCap: number;
+    usedToday: number;
+    maxSide: number;
+    maxSteps: number;
+    bulkMax: number;
+    perIpPer10Min: number;
+  };
   pricesChecked: string;
 }

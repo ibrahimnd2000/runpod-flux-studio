@@ -6,7 +6,7 @@ import type { EndpointView, HistoryView } from "@/lib/types";
 
 import { getJson } from "./api";
 import EndpointPanel from "./EndpointPanel";
-import GeneratePanel from "./GeneratePanel";
+import GenerateSection from "./GenerateSection";
 import HistoryPanel from "./HistoryPanel";
 
 export default function Dashboard() {
@@ -37,6 +37,11 @@ export default function Dashboard() {
     }
   }, []);
 
+  const onFinished = useCallback(() => {
+    loadHistory();
+    loadEndpoint();
+  }, [loadHistory, loadEndpoint]);
+
   useEffect(() => {
     const first = setTimeout(() => {
       loadEndpoint();
@@ -54,13 +59,11 @@ export default function Dashboard() {
   return (
     <div className="grid gap-5 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
       <div className="space-y-5">
-        <GeneratePanel
+        <GenerateSection
           maxSide={history?.limits.maxSide ?? 1024}
           maxSteps={history?.limits.maxSteps ?? 28}
-          onFinished={() => {
-            loadHistory();
-            loadEndpoint();
-          }}
+          bulkMax={history?.limits.bulkMax ?? 8}
+          onFinished={onFinished}
         />
         <HistoryPanel h={history} error={historyError} />
       </div>

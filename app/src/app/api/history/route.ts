@@ -40,6 +40,8 @@ export async function GET() {
       usedToday: submittedSince(startOfUtcDay()),
       maxSide: config.maxSide,
       maxSteps: config.maxSteps,
+      bulkMax: config.bulkMax,
+      perIpPer10Min: config.perIpPer10Min,
     },
     pricesChecked,
   };
