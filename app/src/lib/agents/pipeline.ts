@@ -131,7 +131,7 @@ export function validateSpec(spec: PipelineSpec): PipelineSpec {
   return { ...spec, name: String(spec.name ?? "Custom pipeline").slice(0, 80), steps };
 }
 
-function render(template: string, inputs: Record<string, string>, outputs: Map<string, StepOutput>, item?: string) {
+export function render(template: string, inputs: Record<string, string>, outputs: Map<string, StepOutput>, item?: string) {
   return template
     .replace(/\{\{\s*item\s*\}\}/g, item ?? "")
     .replace(/\{\{\s*input\.([a-z0-9_]+)\s*\}\}/gi, (_, k) => inputs[k] ?? "")
@@ -148,7 +148,7 @@ function render(template: string, inputs: Record<string, string>, outputs: Map<s
 }
 
 /** First JSON array/object in a model reply (models sometimes wrap JSON in prose or fences). */
-function extractJson(text: string): unknown {
+export function extractJson(text: string): unknown {
   const m = /[[{][\s\S]*[\]}]/.exec(text);
   if (!m) return null;
   try {

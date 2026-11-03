@@ -45,7 +45,8 @@ jobs:
           push: false
 
   app:
-    # Next.js demo app: lint, typecheck and a production build. No secrets needed.
+    # Next.js demo app: lint, typecheck, unit + route tests (Vitest, fake Runpod and
+    # Anthropic APIs) and a production build. No secrets needed.
     runs-on: ubuntu-24.04
     defaults:
       run:
@@ -60,4 +61,5 @@ jobs:
       - run: npm ci
       - run: npm run lint
       - run: npm run typecheck
+      - run: npm test
       - run: npm run build

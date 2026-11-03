@@ -58,6 +58,8 @@ export interface VideoResult {
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+// Dry runs pause like a (very fast) GPU so the UI shows progress; tests set 0.
+const dryDelay = (ms: number) => sleep(ms * (Number(process.env.DRY_RUN_DELAY_SCALE ?? 1) || 0));
 
 async function waitFor<T extends { status: string }>(
   ctx: GpuCtx,
@@ -94,7 +96,7 @@ export async function generateImages(
     const offset = (Math.random() * mock.images.length) | 0;
     return Promise.all(
       inputs.map(async (input, i) => {
-        await sleep(1200 + Math.random() * 1800);
+        await dryDelay(1200 + Math.random() * 1800);
         const id = `dry-${randomUUID()}`;
         const costUsd = MEASURED.imageUsd * (input.num_inference_steps / 28) * ((input.width * input.height) / 1024 ** 2);
         saveMedia(
@@ -145,7 +147,7 @@ export async function animateImage(ctx: GpuCtx, sourceId: string, motion: string
   const frames = { 2: 49, 3: 73, 5: 121 }[seconds];
 
   if (ctx.dryRun) {
-    await sleep(2500 + Math.random() * 2000);
+    await dryDelay(2500 + Math.random() * 2000);
     const id = `dry-${randomUUID()}`;
     const costUsd = MEASURED.videoUsdPerS * seconds;
     saveMedia(
