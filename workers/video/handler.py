@@ -1,14 +1,18 @@
 """
 Runpod Serverless worker: LTX-2.5 (distilled) image-to-video with audio.
 
-Weights come from Runpod model caching (endpoint created with --model-reference),
-mounted under /runpod-volume/huggingface-cache/hub, so the image stays small and
-the 72 GB of weights never travel through a registry. The pipeline is loaded
+Weights come from Runpod model caching (endpoint "Cached model" setting). Runpod
+mounts the snapshot at /runpod/model-store/huggingface/<org>/<name>/<revision>
+(seen via `runpodctl serverless model-status`; the docs describe a Hugging Face
+cache layout under /runpod-volume, which is also checked). The image stays small
+and the 72 GB of weights never travel through a registry. The pipeline is loaded
 once at import time; warm requests reuse it.
 
 Environment:
   MODEL_ID         Hugging Face repo id (default Lightricks/LTX-2.5-Diffusers)
-  MODEL_CACHE_DIR  Runpod model cache root (default /runpod-volume/huggingface-cache/hub)
+  MODEL_PATH       explicit local snapshot directory (overrides the lookup below)
+  MODEL_STORE_DIR  Runpod model store root (default /runpod/model-store/huggingface)
+  MODEL_CACHE_DIR  Hugging Face cache layout root (default /runpod-volume/huggingface-cache/hub)
   OFFLOAD          "model" (default: components move to the GPU only while used) or "none"
   MAX_RESULT_MB    refuse results whose base64 MP4 exceeds this (default 15)
   MOCK_PIPELINE    "1" to skip torch/diffusers and return a synthetic clip (local/CPU tests)
@@ -34,6 +38,8 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 log = logging.getLogger("ltx-worker")
 
 MODEL_ID = os.environ.get("MODEL_ID", "Lightricks/LTX-2.5-Diffusers")
+MODEL_PATH = os.environ.get("MODEL_PATH", "")
+MODEL_STORE_DIR = os.environ.get("MODEL_STORE_DIR", "/runpod/model-store/huggingface")
 MODEL_CACHE_DIR = os.environ.get("MODEL_CACHE_DIR", "/runpod-volume/huggingface-cache/hub")
 OFFLOAD = os.environ.get("OFFLOAD", "model").lower()
 MAX_RESULT_MB = float(os.environ.get("MAX_RESULT_MB", "15"))
@@ -66,16 +72,29 @@ class InputError(ValueError):
 # --------------------------------------------------------------------------- #
 #                                  Backends                                   #
 # --------------------------------------------------------------------------- #
-def resolve_model_path(model_id: str, cache_dir: str) -> str:
+def _newest_snapshot(parent: str) -> str | None:
+    """Newest subdirectory of `parent` that looks like a diffusers snapshot."""
+    if not os.path.isdir(parent):
+        return None
+    candidates = [os.path.join(parent, d) for d in os.listdir(parent)]
+    candidates = [c for c in candidates if os.path.isfile(os.path.join(c, "model_index.json"))]
+    return max(candidates, key=os.path.getmtime) if candidates else None
+
+
+def resolve_model_path(model_id: str, store_dir: str, cache_dir: str, explicit: str = "") -> str:
     """Local snapshot from Runpod's model cache if present, else the repo id (downloads, needs HF_TOKEN)."""
-    snapshots = os.path.join(cache_dir, "models--" + model_id.replace("/", "--"), "snapshots")
-    if os.path.isdir(snapshots):
-        versions = sorted(
-            (os.path.join(snapshots, d) for d in os.listdir(snapshots)), key=os.path.getmtime, reverse=True
-        )
-        if versions:
-            return versions[0]
-    log.warning("No cached snapshot under %s; falling back to downloading %s", snapshots, model_id)
+    if explicit:
+        return explicit
+    store = os.path.join(store_dir, *model_id.split("/"))  # /runpod/model-store/huggingface/<org>/<name>/<rev>
+    hf_cache = os.path.join(cache_dir, "models--" + model_id.replace("/", "--"), "snapshots")
+    for parent in (store, hf_cache):
+        found = _newest_snapshot(parent)
+        if found:
+            return found
+    for parent in (store, hf_cache):
+        if os.path.isdir(parent):
+            log.warning("%s exists but has no snapshot with model_index.json: %s", parent, os.listdir(parent)[:10])
+    log.warning("No cached snapshot in %s or %s; falling back to %s", store, hf_cache, model_id)
     return model_id
 
 
@@ -89,7 +108,7 @@ class LTXBackend:
 
         self.torch = torch
         self.sigmas = DISTILLED_SIGMA_VALUES
-        path = resolve_model_path(model_id, MODEL_CACHE_DIR)
+        path = resolve_model_path(model_id, MODEL_STORE_DIR, MODEL_CACHE_DIR, MODEL_PATH)
         t0 = time.perf_counter()
         self.pipe = LTX2ImageToVideoPipeline.from_pretrained(path, torch_dtype=torch.bfloat16)
         if OFFLOAD == "model":

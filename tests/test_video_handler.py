@@ -81,8 +81,26 @@ def test_oom_is_reported_and_worker_survives(monkeypatch):
     assert "540p" in run()["error"]
 
 
-def test_model_path_prefers_runpod_cache(tmp_path):
-    snap = tmp_path / "models--Lightricks--LTX-2.5-Diffusers" / "snapshots" / "abc123"
-    snap.mkdir(parents=True)
-    assert handler.resolve_model_path("Lightricks/LTX-2.5-Diffusers", str(tmp_path)) == str(snap)
-    assert handler.resolve_model_path("Lightricks/Other", str(tmp_path)) == "Lightricks/Other"
+def test_model_path_prefers_runpod_model_store(tmp_path):
+    store, cache = tmp_path / "store", tmp_path / "cache"
+    model = "Lightricks/LTX-2.5-Diffusers"
+    rev = store / "Lightricks" / "LTX-2.5-Diffusers" / "4791a110"
+    rev.mkdir(parents=True)
+    (rev / "model_index.json").write_text("{}")
+    hf = cache / "models--Lightricks--LTX-2.5-Diffusers" / "snapshots" / "abc123"
+    hf.mkdir(parents=True)
+    (hf / "model_index.json").write_text("{}")
+    assert handler.resolve_model_path(model, str(store), str(cache)) == str(rev)
+
+
+def test_model_path_falls_back_to_hf_cache_layout_then_repo_id(tmp_path):
+    store, cache = tmp_path / "store", tmp_path / "cache"
+    model = "Lightricks/LTX-2.5-Diffusers"
+    hf = cache / "models--Lightricks--LTX-2.5-Diffusers" / "snapshots" / "abc123"
+    hf.mkdir(parents=True)
+    (hf / "model_index.json").write_text("{}")
+    assert handler.resolve_model_path(model, str(store), str(cache)) == str(hf)
+    # A directory without model_index.json is not a usable snapshot.
+    (store / "Other" / "Model" / "rev").mkdir(parents=True)
+    assert handler.resolve_model_path("Other/Model", str(store), str(cache)) == "Other/Model"
+    assert handler.resolve_model_path(model, str(store), str(cache), explicit="/x") == "/x"

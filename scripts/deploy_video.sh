@@ -14,7 +14,7 @@
 set -euo pipefail
 
 : "${RUNPOD_API_KEY:?set RUNPOD_API_KEY (needed to set the GPU pools)}"
-IMAGE="${IMAGE:-docker.io/ibrahimnd2000/ltx-video-worker:v0.1.0}"
+IMAGE="${IMAGE:-docker.io/ibrahimnd2000/ltx-video-worker:v0.1.1}"
 MODEL_REF="${MODEL_REF:-https://huggingface.co/Lightricks/LTX-2.5-Diffusers:main}"
 WORKERS_MAX="${WORKERS_MAX:-1}"
 IDLE_TIMEOUT="${IDLE_TIMEOUT:-60}"

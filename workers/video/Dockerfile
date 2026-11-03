@@ -42,9 +42,9 @@ print('diffusers', diffusers.__version__, 'transformers', transformers.__version
 
 
 FROM deps AS final
-# Weights come from Runpod's model cache only; never download at runtime by accident.
+# Weights come from Runpod's model cache only (see handler.py); never download at runtime.
 ENV HF_HUB_OFFLINE=1 \
     TRANSFORMERS_OFFLINE=1 \
-    HF_HUB_CACHE=/runpod-volume/huggingface-cache/hub
+    MODEL_STORE_DIR=/runpod/model-store/huggingface
 COPY handler.py .
 CMD ["python", "-u", "handler.py"]
