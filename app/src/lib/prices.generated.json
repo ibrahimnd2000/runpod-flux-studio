@@ -1,0 +1,18 @@
+{
+  "checked": "2026-11-03",
+  "source": "https://www.runpod.io/pricing",
+  "per_hour": {
+    "NVIDIA L40": 1.75,
+    "NVIDIA L40S": 1.75,
+    "NVIDIA RTX 6000 Ada Generation": 1.75,
+    "NVIDIA A40": 1.22,
+    "NVIDIA RTX A6000": 1.22,
+    "NVIDIA GeForce RTX 4090": 1.34,
+    "NVIDIA A100 80GB PCIe": 2.72,
+    "NVIDIA A100-SXM4-80GB": 2.72,
+    "NVIDIA H100 80GB HBM3": 5.39,
+    "NVIDIA H200": 6.99,
+    "NVIDIA B200": 10.79
+  },
+  "network_storage_per_gb_month": 0.07
+}
