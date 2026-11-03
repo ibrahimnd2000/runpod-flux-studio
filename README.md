@@ -20,11 +20,12 @@ _TODO: mermaid diagram (see docs/architecture.md)._
 
 ### Run the image worker locally (no GPU)
 ```bash
-python3 -m venv .venv && .venv/bin/pip install -r workers/image/requirements-dev.txt
-cd workers/image
+python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
 
-# Unit tests
-../../.venv/bin/pytest -q tests
+# Lint + unit tests (same as CI)
+.venv/bin/ruff check . && .venv/bin/pytest -q
+
+cd workers/image
 
 # Runpod SDK local test mode: runs one job from test_input.json and exits
 MOCK_PIPELINE=1 ../../.venv/bin/python handler.py
@@ -81,7 +82,9 @@ _TODO._
 
 ## Repository layout
 ```
-workers/image/   FLUX.1-dev Serverless worker (handler, Dockerfile, tests)
+workers/image/   FLUX.1-dev Serverless worker (handler, Dockerfile)
+tests/           handler tests with a mocked pipeline (run in CI)
+.github/         CI: ruff, pytest, hadolint, Docker build of the no-weights stage
 workers/video/   Wan 2.2 TI2V-5B worker (stretch)
 app/             Next.js web app (API key stays server-side)
 bench/           benchmark + cost scripts, prices.yaml

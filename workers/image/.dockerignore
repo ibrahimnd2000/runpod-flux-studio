@@ -2,7 +2,6 @@ tests/
 __pycache__/
 *.pyc
 test_input.json
-requirements-dev.txt
 simulated_uploaded/
 local_upload/
 .env*

@@ -1,15 +1,21 @@
+"""Image worker tests. MOCK_PIPELINE=1 swaps FLUX for a synthetic backend, so no GPU is needed."""
+
 import base64
+import importlib.util
 import io
 import os
-import sys
+from pathlib import Path
+
+from PIL import Image
 
 os.environ["MOCK_PIPELINE"] = "1"
 os.environ.pop("BUCKET_ENDPOINT_URL", None)
-sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
-from PIL import Image  # noqa: E402
-
-import handler  # noqa: E402
+# Each worker has its own handler.py, so load this one under a unique module name.
+_path = Path(__file__).resolve().parents[1] / "workers" / "image" / "handler.py"
+_spec = importlib.util.spec_from_file_location("image_handler", _path)
+handler = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(handler)
 
 
 def run(**inp):
