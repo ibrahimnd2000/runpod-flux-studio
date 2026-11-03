@@ -1,0 +1,11 @@
+# torch comes from the base image (see Dockerfile). LTX-2.5 isn't in a diffusers
+# release yet, so diffusers is pinned to a main-branch commit.
+runpod==2.0.0
+diffusers @ git+https://github.com/huggingface/diffusers@35087a644038eb531f48581708d4763044cb4852
+transformers==5.22.1
+accelerate==1.15.0
+sentencepiece==0.2.2
+protobuf==7.36.2
+huggingface_hub==2.4.0
+av==19.0.2
+pillow==13.0.0

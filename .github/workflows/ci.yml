@@ -24,18 +24,22 @@ jobs:
       - run: pytest -v
 
   dockerfile:
-    # Lints the Dockerfile and builds the `check` stage: real base image and pinned
-    # deps, imports FluxPipeline and the handler. No weights, no HF token, no secrets.
+    # Lints each worker's Dockerfile and builds its `check` stage: real base image and
+    # pinned deps, imports the real pipeline classes and the handler. No weights, no
+    # HF token, no secrets.
     runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        worker: [image, video]
     steps:
       - uses: actions/checkout@v7.0.1
       - uses: hadolint/hadolint-action@v3.5.0
         with:
-          dockerfile: workers/image/Dockerfile
+          dockerfile: workers/${{ matrix.worker }}/Dockerfile
       - uses: docker/setup-buildx-action@v4.4.1
       - uses: docker/build-push-action@v7.4.0
         with:
-          context: workers/image
+          context: workers/${{ matrix.worker }}
           target: check
           platforms: linux/amd64
           push: false
