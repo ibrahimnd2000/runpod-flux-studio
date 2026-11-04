@@ -75,7 +75,7 @@ export default function SingleResult({
   return (
     <div className="space-y-4">
       {problem && <Notice tone={problem.tone} title={problem.title}>{problem.detail}</Notice>}
-      <div className="grid gap-5 xl:grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)]">
+      <div className="grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)]">
         <div>
           <div
             className="relative mx-auto max-h-[70vh] overflow-hidden rounded-xl border border-border bg-muted"

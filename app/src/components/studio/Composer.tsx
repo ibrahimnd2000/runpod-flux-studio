@@ -163,7 +163,7 @@ export default function Composer({
         </div>
       )}
 
-      <div className="grid gap-5 md:grid-cols-2">
+      <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
         <div className="space-y-2">
           <span className="flex items-center text-xs text-subtle">
             <Term term="aspect">Aspect ratio</Term>

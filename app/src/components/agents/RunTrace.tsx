@@ -8,6 +8,7 @@ import type { RunEvent, RunPollView } from "@/lib/agentTypes";
 import { secs, usd } from "../format";
 import { Badge } from "../ui/primitives";
 import { MediaGrid } from "./shared";
+import Prose from "../ui/Prose";
 
 // The agent's trace, in order: reasoning summaries, messages, each tool call with
 // its arguments and result (thumbnails for media), and per-turn token usage.
@@ -118,7 +119,7 @@ export default function RunTrace({ run, autoScroll = true, dense = false }: { ru
             return (
               <div key={e.seq} className="flex gap-2">
                 <MessageSquare className="mt-0.5 h-4 w-4 shrink-0 text-accent" aria-hidden />
-                <p className="whitespace-pre-wrap">{e.text}</p>
+                <Prose text={e.text} />
               </div>
             );
           case "tool_call":

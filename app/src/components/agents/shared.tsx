@@ -233,7 +233,7 @@ export function BudgetFields({ value, max, onChange, showTurns = true }: { value
     <label className="block">
       <span className="mb-1 block text-[11px] text-subtle">{label}</span>
       <input
-        className="input py-1.5 font-mono"
+        className="input w-full min-w-0 py-1.5 font-mono"
         type="number"
         min={k === "maxUsd" ? 0.01 : 0}
         max={max[k]}
@@ -244,7 +244,7 @@ export function BudgetFields({ value, max, onChange, showTurns = true }: { value
     </label>
   );
   return (
-    <div className={`grid gap-2 ${showTurns ? "grid-cols-4" : "grid-cols-3"}`}>
+    <div className={`grid gap-2 ${showTurns ? "grid-cols-2 sm:grid-cols-4" : "grid-cols-3"}`}>
       {field("maxUsd", "Max $", 0.05)}
       {field("maxImages", "Images", 1)}
       {field("maxVideos", "Clips", 1)}

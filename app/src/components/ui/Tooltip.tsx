@@ -33,7 +33,7 @@ export function Tooltip({
       <span
         id={id}
         role="tooltip"
-        className={`pointer-events-none absolute z-50 w-64 rounded-lg border border-border bg-card px-3 py-2 text-left text-xs leading-relaxed font-normal normal-case tracking-normal text-foreground opacity-0 shadow-lg transition-opacity duration-150 group-focus-within/tip:opacity-100 group-hover/tip:opacity-100 ${pos}`}
+        className={`pointer-events-none absolute z-50 w-64 rounded-lg border border-border bg-card px-3 py-2 text-left text-xs leading-relaxed font-normal normal-case tracking-normal text-foreground hidden shadow-lg group-focus-within/tip:block group-hover/tip:block ${pos}`}
       >
         {content}
       </span>

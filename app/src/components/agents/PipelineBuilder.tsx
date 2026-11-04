@@ -12,6 +12,7 @@ import { Term } from "../ui/Tooltip";
 import { useAccessCode } from "../useAccessCode";
 import { RecentRunList, useRecentRuns, useRunParam } from "./AgentPlayground";
 import { BudgetFields, MediaGrid, ModelSelect, RunBar, SpendMeter, StatusBadge, useAgentsConfig, usePost, useRun } from "./shared";
+import Prose from "../ui/Prose";
 
 const TYPE_META: Record<StepType, { label: string; icon: typeof Workflow; hint: string }> = {
   llm: { label: "LLM", icon: MessageSquareText, hint: "Write text, or a list of prompts" },
@@ -324,7 +325,7 @@ export default function PipelineBuilder() {
             </div>
           </Card>
 
-          <div className="grid gap-6 lg:grid-cols-[minmax(0,6fr)_minmax(0,6fr)]">
+          <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,6fr)_minmax(0,6fr)]">
             <div className="space-y-6">
               <Card
                 title="Recipe"
@@ -461,7 +462,7 @@ export default function PipelineBuilder() {
                           <MediaGrid ids={ev!.mediaIds} media={run.media} />
                         ) : null}
                         {ev!.summary && (!ev!.mediaIds?.length || step.type === "pick") && (
-                          <p className="rounded-lg bg-muted/60 px-3 py-2 text-xs whitespace-pre-wrap">{ev!.summary}</p>
+                          <Prose className="rounded-lg bg-muted/60 px-3 py-2 text-xs" text={ev!.summary} />
                         )}
                       </div>
                     ))}

@@ -13,6 +13,7 @@ import { Term } from "../ui/Tooltip";
 import { useAccessCode } from "../useAccessCode";
 import RunTrace from "./RunTrace";
 import { BudgetFields, MediaGrid, ModelSelect, RunBar, SpendMeter, StatusBadge, useAgentsConfig, usePost, useRun } from "./shared";
+import Prose from "../ui/Prose";
 
 export const EXAMPLE_BRIEFS = [
   "Hero image for a small Lisbon bakery's Instagram launch: a pastel de nata on blue azulejo tiles, warm morning light.",
@@ -124,7 +125,7 @@ export default function AgentPlayground() {
         </Notice>
       )}
 
-      <div className="grid gap-6 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]">
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]">
         <div className="space-y-6">
           <Card title="Brief">
             <div className="space-y-4">
@@ -221,7 +222,7 @@ export default function AgentPlayground() {
                 >
                   <div className="space-y-3">
                     {run.error && <Notice tone="warn" title="Note">{run.error}</Notice>}
-                    <p className="text-sm whitespace-pre-wrap">{run.result.text}</p>
+                    <Prose className="text-sm" text={run.result.text} />
                     <MediaGrid ids={run.result.mediaIds} media={run.media} />
                   </div>
                 </Card>
