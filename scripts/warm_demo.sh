@@ -21,7 +21,16 @@ LLM_EP="${RUNPOD_LLM_ENDPOINT_ID:-gdk2e7i6wa5zto}"
 patch() { # endpoint, JSON body
   curl -sS -X PATCH "https://api.runpod.io/v2/serverless/$1" -H "Authorization: Bearer ${RUNPOD_API_KEY}" \
     -H "Content-Type: application/json" -d "$2" |
-    python3 -c 'import json,sys; d=json.load(sys.stdin); print(" ", d.get("name") or d.get("id"), "workers:", d.get("workers"), "pools:", (d.get("gpu") or {}).get("pools"), d.get("error") or "")'
+    python3 -c 'import json,sys
+raw = sys.stdin.read()
+try:
+    d = json.loads(raw)
+except ValueError:
+    d = {}
+if "workers" in d:
+    print(" ", d.get("name") or d.get("id"), "workers:", d["workers"], "pools:", (d.get("gpu") or {}).get("pools"))
+else:
+    print("  FAILED:", raw[:400]); sys.exit(1)'
 }
 
 health() {
@@ -33,7 +42,7 @@ health() {
 case "${1:-status}" in
   on)
     patch "$IMAGE_EP" '{"workers":{"min":1,"max":1},"gpu":{"pools":["ADA_48_PRO","AMPERE_48","AMPERE_80"],"excludedTypes":["NVIDIA RTX PRO 6000 Blackwell Server Edition MIG 2g.48gb"]}}'
-    patch "$LLM_EP" '{"workers":{"min":1,"max":1},"gpu":{"pools":["AMPERE_24","ADA_24","AMPERE_48"],"excludedTypes":["NVIDIA RTX PRO 6000 Blackwell Server Edition MIG 1g.24gb","NVIDIA RTX PRO 6000 Blackwell Server Edition MIG 2g.48gb"]}}'
+    patch "$LLM_EP" '{"workers":{"min":1,"max":1},"gpu":{"pools":["AMPERE_24","ADA_24","AMPERE_48"],"excludedTypes":["NVIDIA RTX PRO 6000 Blackwell Server Edition MIG 1g.24gb"]}}'
     echo "Warm since $(date '+%a %d %b %H:%M'). Placing a worker can take 5-15 min (image pull)."
     echo "Billing until you run: scripts/warm_demo.sh off"
     ;;
