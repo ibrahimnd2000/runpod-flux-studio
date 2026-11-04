@@ -23,6 +23,9 @@ const TOOL_ICON: Record<string, typeof Wrench> = {
   finish: Flag,
 };
 
+/** The run's phase says a job is queued for a GPU (not yet running on one). */
+export const waitingForGpu = (phase?: string) => !!phase && /waiting for a (video )?GPU/i.test(phase);
+
 type ToolCallEvent = Extract<RunEvent, { type: "tool_call" }>;
 type ToolResultEvent = Extract<RunEvent, { type: "tool_result" }>;
 
@@ -45,7 +48,7 @@ function Args({ call }: { call: ToolCallEvent }) {
   return <pre className="max-h-48 overflow-auto rounded-md bg-muted px-2.5 py-2 font-mono text-[11px] leading-relaxed whitespace-pre-wrap">{json}</pre>;
 }
 
-function ToolCard({ call, result, media }: { call: ToolCallEvent; result?: ToolResultEvent; media: RunPollView["media"] }) {
+function ToolCard({ call, result, media, phase }: { call: ToolCallEvent; result?: ToolResultEvent; media: RunPollView["media"]; phase?: string }) {
   const Icon = TOOL_ICON[call.name] ?? Wrench;
   const pending = !result;
   const showMedia = result?.mediaIds?.length && call.name !== "finish";
@@ -55,7 +58,11 @@ function ToolCard({ call, result, media }: { call: ToolCallEvent; result?: ToolR
         <Icon className={`h-4 w-4 ${pending ? "animate-pulse text-accent" : "text-subtle"}`} aria-hidden />
         <code className="text-xs font-semibold">{call.name}</code>
         {pending ? (
-          <Badge tone="blue">running</Badge>
+          waitingForGpu(phase) ? (
+            <Badge tone="neutral">waiting for GPU</Badge>
+          ) : (
+            <Badge tone="blue">{phase ? "on GPU" : "running"}</Badge>
+          )
         ) : (
           <>
             <Badge tone={result.ok ? "green" : "red"}>{result.ok ? "ok" : "refused"}</Badge>
@@ -123,7 +130,7 @@ export default function RunTrace({ run, autoScroll = true, dense = false }: { ru
               </div>
             );
           case "tool_call":
-            return <ToolCard key={e.seq} call={e} result={results.get(e.callId)} media={run.media} />;
+            return <ToolCard key={e.seq} call={e} result={results.get(e.callId)} media={run.media} phase={run.status === "running" ? run.phase : undefined} />;
           case "llm":
             return (
               <p key={e.seq} className="flex items-center gap-1.5 font-mono text-[10px] text-subtle">
@@ -142,8 +149,9 @@ export default function RunTrace({ run, autoScroll = true, dense = false }: { ru
         }
       })}
       {run.status === "running" && (
-        <p className="flex items-center gap-2 text-xs text-subtle">
-          <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-accent" /> working…
+        <p className="flex items-center gap-2 text-xs text-subtle" aria-live="polite">
+          <span className={`h-1.5 w-1.5 rounded-full ${waitingForGpu(run.phase) ? "bg-amber-500" : "animate-pulse bg-accent"}`} />{" "}
+          {run.phase ?? "working…"}
         </p>
       )}
       <div ref={end} />

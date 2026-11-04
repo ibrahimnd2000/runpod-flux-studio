@@ -14,7 +14,7 @@ flowchart LR
     end
 
     subgraph SL["Runpod Serverless endpoint y6hj5mx4y5b2su"]
-        Q[[Queue + autoscaler<br/>min 0 · max 2 · idle 60 s · FlashBoot]]
+        Q[[Queue + autoscaler<br/>min 0 · max 1 · idle 60 s · FlashBoot]]
         W1["Worker: handler.py<br/>FLUX.1-dev BF16<br/>L40 / L40S / 6000 Ada / A40 / A6000"]
         W2[Worker 2]
         Q --> W1

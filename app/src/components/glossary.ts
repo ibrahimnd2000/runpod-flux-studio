@@ -62,6 +62,9 @@ export const GLOSSARY = {
     "Claude: tokens × Anthropic's list price. Runpod vLLM: GPU-seconds × the GPU's price, an estimate because the worker bills time, not tokens.",
   judge: "Claude Opus 5.5 looks at both deliveries (the actual images) plus what each agent spent, and scores brief fit, quality and efficiency.",
   elo: "Chess-style rating: beating a higher-rated contestant gains more points. Everyone starts at 1000. Your vote overrides the judge.",
+  lora: "Low-rank adaptation: small trainable matrices added to FLUX's attention layers (about 1% of its size). Training them on a few images teaches a style or subject without changing the base model.",
+  trigger: "A made-up word every training caption starts with. Put it in a prompt to call up what the LoRA learned; leave it out and the model mostly behaves as before.",
+  loraScale: "How strongly the LoRA is applied: 1 is as trained, lower blends back toward plain FLUX, above 1 exaggerates it.",
 } as const;
 
 export type GlossaryKey = keyof typeof GLOSSARY;

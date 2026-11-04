@@ -13,6 +13,7 @@ import { useAccessCode } from "../useAccessCode";
 import { RecentRunList, useRecentRuns, useRunParam } from "./AgentPlayground";
 import { BudgetFields, MediaGrid, ModelSelect, RunBar, SpendMeter, StatusBadge, useAgentsConfig, usePost, useRun } from "./shared";
 import Prose from "../ui/Prose";
+import { waitingForGpu } from "./RunTrace";
 
 const TYPE_META: Record<StepType, { label: string; icon: typeof Workflow; hint: string }> = {
   llm: { label: "LLM", icon: MessageSquareText, hint: "Write text, or a list of prompts" },
@@ -50,7 +51,7 @@ const H = 70;
 const GX = 56;
 const GY = 18;
 
-function Graph({ spec, states }: { spec: PipelineSpec; states: Map<string, StepEvent> }) {
+function Graph({ spec, states, phase }: { spec: PipelineSpec; states: Map<string, StepEvent>; phase?: string }) {
   const layout = useMemo(() => {
     const level = new Map<string, number>();
     for (const s of spec.steps) level.set(s.id, Math.max(0, ...deps(s).map((d) => (level.get(d) ?? 0) + 1)));
@@ -114,7 +115,7 @@ function Graph({ spec, states }: { spec: PipelineSpec; states: Map<string, StepE
                 <span>· {TYPE_META[s.type].label}</span>
                 {s.type === "llm" && s.list && <span>· list ×{s.count}</span>}
                 <span className="ml-auto font-mono">
-                  {ev?.ms !== undefined ? secs(ev.ms) : state}
+                  {ev?.ms !== undefined ? secs(ev.ms) : state === "running" && waitingForGpu(phase) ? "waiting for GPU" : state}
                   {ev?.costUsd ? ` · ${usd(ev.costUsd)}` : ""}
                 </span>
               </div>
@@ -315,7 +316,12 @@ export default function PipelineBuilder() {
             actions={run ? <StatusBadge status={run.status} /> : null}
           >
             <div className="space-y-4">
-              {shown && <Graph spec={shown} states={states} />}
+              {shown && <Graph spec={shown} states={states} phase={run?.status === "running" ? run.phase : undefined} />}
+              {run?.status === "running" && run.phase && (
+                <p className="flex items-center gap-2 text-xs text-subtle" aria-live="polite">
+                  <span className={`h-1.5 w-1.5 rounded-full ${waitingForGpu(run.phase) ? "bg-amber-500" : "animate-pulse bg-accent"}`} /> {run.phase}
+                </p>
+              )}
               {run && <SpendMeter run={run} />}
               {viewing && (
                 <Button size="sm" variant="ghost" onClick={() => setRunId(null)}>

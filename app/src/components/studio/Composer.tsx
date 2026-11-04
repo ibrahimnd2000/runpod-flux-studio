@@ -1,7 +1,10 @@
 "use client";
 
-import { Dice5, Layers, Lock, RectangleHorizontal, RectangleVertical, Sparkles, Square, Unlock } from "lucide-react";
+import { Dice5, GraduationCap, Layers, Lock, RectangleHorizontal, RectangleVertical, Sparkles, Square, Unlock } from "lucide-react";
+import Link from "next/link";
 import { useEffect, useRef } from "react";
+
+import type { LoraView } from "@/lib/types";
 
 import { Button, Segmented, Slider } from "../ui/primitives";
 import { Term } from "../ui/Tooltip";
@@ -34,6 +37,9 @@ export interface Settings {
   guidance: number;
   seed: string;
   seedLocked: boolean;
+  /** A ready LoRA's id, or "" for plain FLUX. */
+  lora: string;
+  loraScale: number;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -46,6 +52,8 @@ export const DEFAULT_SETTINGS: Settings = {
   guidance: 3.5,
   seed: "",
   seedLocked: false,
+  lora: "",
+  loraScale: 1,
 };
 
 export const bulkPrompts = (s: Settings) => s.prompts.split("\n").map((p) => p.trim()).filter(Boolean);
@@ -59,6 +67,7 @@ export default function Composer({
   bulkMax,
   busy,
   onGenerate,
+  loras = [],
 }: {
   settings: Settings;
   set: (patch: Partial<Settings>) => void;
@@ -68,7 +77,12 @@ export default function Composer({
   bulkMax: number;
   busy: boolean;
   onGenerate: () => void;
+  /** Ready LoRAs; the picker only shows when there is at least one. */
+  loras?: LoraView[];
 }) {
+  const lora = loras.find((l) => l.id === settings.lora);
+  const promptText = settings.mode === "single" ? settings.prompt : settings.prompts;
+  const missingTrigger = !!lora && !promptText.toLowerCase().includes(lora.trigger);
   const form = useRef<HTMLFormElement>(null);
   const bulkCount = bulkPrompts(settings).length * settings.variations;
   const tooMany = settings.mode === "bulk" && bulkCount > bulkMax;
@@ -160,6 +174,48 @@ export default function Composer({
               {bulkPrompts(settings).length} prompts × {settings.variations} = {bulkCount} / {bulkMax} images
             </span>
           </div>
+        </div>
+      )}
+
+      {loras.length > 0 && (
+        <div className="grid grid-cols-1 items-end gap-4 rounded-xl border border-border bg-muted/40 p-3 md:grid-cols-2">
+          <label className="block">
+            <span className="mb-1.5 flex items-center gap-1.5 text-xs text-subtle">
+              <GraduationCap className="h-3.5 w-3.5" /> <Term term="lora">LoRA</Term>
+              <Link href="/lora" className="ml-auto text-accent hover:underline">
+                train one
+              </Link>
+            </span>
+            <select className="input w-full" value={settings.lora} onChange={(e) => set({ lora: e.target.value })} aria-label="LoRA">
+              <option value="">None · plain FLUX.1-dev</option>
+              {loras.map((l) => (
+                <option key={l.id} value={l.id}>
+                  {l.name} · {l.trigger}
+                </option>
+              ))}
+            </select>
+          </label>
+          {lora && (
+            <Slider
+              label={<Term term="loraScale">Strength</Term>}
+              value={settings.loraScale}
+              min={0}
+              max={1.5}
+              step={0.05}
+              onChange={(loraScale) => set({ loraScale })}
+              format={(v) => v.toFixed(2)}
+            />
+          )}
+          {missingTrigger && (
+            <p className="text-xs text-subtle md:col-span-2">
+              The prompt doesn&apos;t mention <code className="font-mono text-foreground">{lora.trigger}</code>, the word the LoRA was trained on.{" "}
+              {settings.mode === "single" && (
+                <button type="button" className="text-accent hover:underline" onClick={() => set({ prompt: `${lora.trigger}, ${settings.prompt}` })}>
+                  Add it
+                </button>
+              )}
+            </p>
+          )}
         </div>
       )}
 

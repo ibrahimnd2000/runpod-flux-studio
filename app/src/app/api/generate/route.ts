@@ -1,5 +1,5 @@
 import { checkAccess, clientIp, LimitError, readJson, sanitizeInput } from "@/lib/limits";
-import { submitJob } from "@/lib/runpod";
+import { submitImage } from "@/lib/loras";
 import { addPending, noteIp } from "@/lib/store";
 
 // Browser -> here -> Runpod /run. Returns the job id; the browser then polls
@@ -9,7 +9,7 @@ export async function POST(req: Request) {
   try {
     checkAccess(req.headers.get("x-access-code"), ip);
     const input = sanitizeInput(await readJson(req));
-    const job = await submitJob(input);
+    const job = await submitImage(input);
     addPending(job.id, input, ip);
     noteIp(ip);
     return Response.json({ id: job.id, status: job.status, input });

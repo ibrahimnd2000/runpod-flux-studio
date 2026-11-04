@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { Budget } from "@/lib/agentTypes";
 import type { GpuCtx } from "@/lib/agents/gpu";
-import { addSpend, createRun, emit, finishRun, getRun, listRuns, stopRun, totalUsd } from "@/lib/agents/runs";
+import { addSpend, createRun, emit, finishRun, getRun, listRuns, setPhase, stopRun, totalUsd } from "@/lib/agents/runs";
 import { executeTool, imageCost, toolCatalog, toolSpecs } from "@/lib/agents/tools";
 import { saveMedia } from "@/lib/media";
 
@@ -147,5 +147,27 @@ describe("run store", () => {
     expect(run.aborted).toBe(true);
     finishRun(run, "stopped");
     expect(stopRun(run.view.id)).toBe(false);
+  });
+});
+
+describe("GPU phase text", () => {
+  it("never calls a queued job running", async () => {
+    const { imagePhase } = await import("@/lib/agents/gpu");
+    expect(imagePhase(["IN_QUEUE", "IN_QUEUE"])).toMatch(/^Waiting for a GPU \(2 images queued/);
+    expect(imagePhase(["IN_PROGRESS", "IN_QUEUE"])).toBe("Generating 1 image on the GPU · 1 image waiting for a GPU…");
+    expect(imagePhase(["COMPLETED", "IN_PROGRESS"])).toBe("Generating 1 image on the GPU…");
+    expect(imagePhase(["COMPLETED", "FAILED"])).toBeUndefined();
+  });
+});
+
+describe("run phase", () => {
+  it("is shown while running and cleared when the run ends", () => {
+    const run = newRun();
+    setPhase(run, "Waiting for a GPU (1 image queued)…");
+    expect(getRun(run.view.id)?.phase).toMatch(/^Waiting for a GPU/);
+    finishRun(run, "done", { text: "ok", mediaIds: [] });
+    expect(getRun(run.view.id)?.phase).toBeUndefined();
+    setPhase(run, "late update");
+    expect(getRun(run.view.id)?.phase).toBeUndefined();
   });
 });

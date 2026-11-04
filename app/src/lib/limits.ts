@@ -100,6 +100,13 @@ export function sanitizeInput(body: Record<string, unknown>): GenerateInput {
   if (body.seed !== undefined && body.seed !== null && body.seed !== "") {
     input.seed = clamp(body.seed, 0, 2 ** 32 - 1, 0);
   }
+  // Shape only here; whether that LoRA exists and is ready is checked at submit (lib/loras.ts).
+  const lora = body.lora as { id?: unknown; scale?: unknown } | null | undefined;
+  if (lora && typeof lora === "object" && lora.id) {
+    if (typeof lora.id !== "string" || !/^lora_[a-f0-9]{12}$/.test(lora.id)) throw new LimitError("Unknown LoRA.", 400);
+    const scale = Number(lora.scale ?? 1);
+    input.lora = { id: lora.id, scale: Number.isFinite(scale) ? Math.min(Math.max(Math.round(scale * 100) / 100, 0), 2) : 1 };
+  }
   return input;
 }
 

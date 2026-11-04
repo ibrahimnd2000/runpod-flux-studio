@@ -5,8 +5,9 @@ import { randomUUID } from "node:crypto";
 import { config, videoModels } from "../config";
 import { refreshImageJob } from "../imageJobs";
 import { checkAccess, checkVideoAccess, LimitError, sanitizeAnimate, sanitizeInput } from "../limits";
+import { submitImage } from "../loras";
 import { getMediaItem, readMedia, saveMedia } from "../media";
-import { submitJob, submitVideoJob } from "../runpod";
+import { submitVideoJob } from "../runpod";
 import { addPending, noteIp } from "../store";
 import { TERMINAL } from "../types";
 import { refreshVideoJob } from "../videoJobs";
@@ -34,6 +35,8 @@ export interface GpuCtx {
   ip: string;
   dryRun: boolean;
   aborted: () => boolean;
+  /** Live "what are we waiting on" text for the run's trace; called with no text when done. */
+  phase?: (text?: string) => void;
 }
 
 export interface ImageResult {
@@ -66,6 +69,7 @@ async function waitFor<T extends { status: string }>(
   poll: () => Promise<T | null>,
   everyMs: number,
   timeoutMs: number,
+  onPoll?: (v: T) => void,
 ): Promise<T | null> {
   const end = Date.now() + timeoutMs;
   for (;;) {
@@ -76,10 +80,21 @@ async function waitFor<T extends { status: string }>(
       // A transient status failure must not lose the job; try again next tick.
       console.error("status poll failed", e);
     }
+    if (v) onPoll?.(v);
     if (v && TERMINAL.includes(v.status as never)) return v;
     if (Date.now() > end || ctx.aborted()) return v;
     await sleep(everyMs);
   }
+}
+
+/** "Waiting for a GPU…" until a worker picks a job up, then what is generating and what still waits. */
+export function imagePhase(statuses: string[]): string | undefined {
+  const queued = statuses.filter((x) => x === "IN_QUEUE").length;
+  const running = statuses.filter((x) => x === "IN_PROGRESS").length;
+  const n = (k: number) => `${k} image${k === 1 ? "" : "s"}`;
+  if (running) return `Generating ${n(running)} on the GPU${queued ? ` · ${n(queued)} waiting for a GPU` : ""}…`;
+  if (queued) return `Waiting for a GPU (${n(queued)} queued; a cold start can take a few minutes)…`;
+  return undefined;
 }
 
 /** Generates one image per prompt, in parallel (one Runpod job each), and waits for all of them. */
@@ -110,19 +125,27 @@ export async function generateImages(
 
   checkAccess(ctx.code, ctx.ip, inputs.length);
   const base = Math.floor(Math.random() * 2 ** 31);
-  return Promise.all(
+  const statuses = inputs.map(() => "IN_QUEUE");
+  const report = (i: number, status: string) => {
+    statuses[i] = status;
+    ctx.phase?.(imagePhase(statuses));
+  };
+  ctx.phase?.(imagePhase(statuses));
+  const results = await Promise.all(
     inputs.map(async (input, i): Promise<ImageResult> => {
       input.seed = base + i;
       let id: string;
       try {
-        id = (await submitJob(input)).id;
+        id = (await submitImage(input)).id;
       } catch (e) {
         console.error("agent image submit failed", e);
+        report(i, "FAILED");
         return { prompt: input.prompt, costUsd: 0, error: "Could not submit the job to Runpod." };
       }
       addPending(id, input, ctx.ip);
       noteIp(ctx.ip);
-      const v = await waitFor(ctx, () => refreshImageJob(id), 2000, 20 * 60_000);
+      const v = await waitFor(ctx, () => refreshImageJob(id), 2000, 20 * 60_000, (x) => report(i, x.status));
+      if (!v || !TERMINAL.includes(v.status)) report(i, "TIMED_OUT");
       if (!v || v.status !== "COMPLETED")
         return { prompt: input.prompt, costUsd: v?.costUsd ?? 0, error: v?.error ?? `Job ${v?.status ?? "timed out"}.` };
       return {
@@ -136,6 +159,8 @@ export async function generateImages(
       };
     }),
   );
+  ctx.phase?.();
+  return results;
 }
 
 export const videoAvailable = () => videoModels().length > 0;
@@ -170,7 +195,17 @@ export async function animateImage(ctx: GpuCtx, sourceId: string, motion: string
   });
   addVideoPending(job.id, input, source.prompt);
   noteIp(ctx.ip);
-  const v = await waitFor(ctx, () => refreshVideoJob(job.id), 4000, 40 * 60_000);
+  ctx.phase?.("Waiting for a video GPU (a cold start can take several minutes)…");
+  const v = await waitFor(ctx, () => refreshVideoJob(job.id), 4000, 40 * 60_000, (x) =>
+    ctx.phase?.(
+      x.status === "IN_QUEUE"
+        ? "Waiting for a video GPU (a cold start can take several minutes)…"
+        : x.status === "IN_PROGRESS"
+          ? `Generating the clip on the GPU${x.progress ? ` · step ${x.progress.step}/${x.progress.total_steps}` : ""}…`
+          : undefined,
+    ),
+  );
+  ctx.phase?.();
   if (!v || v.status !== "COMPLETED")
     return { sourceId, model: input.model, costUsd: v?.costUsd ?? 0, error: v?.error ?? `Job ${v?.status ?? "timed out"}.` };
   return {

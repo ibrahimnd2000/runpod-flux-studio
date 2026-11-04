@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 
-import type { HistoryView, JobView } from "@/lib/types";
+import type { HistoryView, JobView, LorasView, LoraView } from "@/lib/types";
 
 import { getJson } from "../api";
 import { useEndpoint } from "../EndpointProvider";
@@ -26,6 +26,19 @@ export default function Studio() {
   const [historyError, setHistoryError] = useState<string | null>(null);
   const { refresh: refreshEndpoint } = useEndpoint();
   const toast = useToast();
+  const [loras, setLoras] = useState<LoraView[]>([]);
+
+  // Ready LoRAs for the picker; /?lora=<id> (from the Fine-tune page) preselects one.
+  useEffect(() => {
+    getJson<LorasView>("/api/loras").then((res) => {
+      if (!res.ok) return;
+      const ready = res.data.loras.filter((l) => l.status === "ready");
+      setLoras(ready);
+      const wanted = new URLSearchParams(window.location.search).get("lora");
+      const pick = ready.find((l) => l.id === wanted);
+      if (pick) setSettings((s) => ({ ...s, lora: pick.id, prompt: s.prompt.includes(pick.trigger) ? s.prompt : `${pick.trigger}, ${s.prompt}` }));
+    });
+  }, []);
 
   const loadHistory = useCallback(async () => {
     const res = await getJson<HistoryView>("/api/history");
@@ -81,7 +94,8 @@ export default function Studio() {
 
   function generate() {
     remember(code);
-    const common = { width: size.w, height: size.h, num_inference_steps: settings.steps, guidance_scale: settings.guidance };
+    const lora = loras.some((l) => l.id === settings.lora) ? { id: settings.lora, scale: settings.loraScale } : undefined;
+    const common = { width: size.w, height: size.h, num_inference_steps: settings.steps, guidance_scale: settings.guidance, lora };
     if (settings.mode === "bulk") {
       bulk.submit({ ...common, prompts: bulkPrompts(settings), variations: settings.variations }, code);
       return;
@@ -103,6 +117,8 @@ export default function Studio() {
       guidance: job.input.guidance_scale,
       seed: String(job.output?.seed ?? ""),
       seedLocked: true,
+      lora: job.input.lora && loras.some((l) => l.id === job.input.lora!.id) ? job.input.lora.id : "",
+      loraScale: job.input.lora?.scale ?? 1,
     });
     toast("success", "Settings and seed loaded: edit the prompt and generate again");
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -129,6 +145,7 @@ export default function Studio() {
               bulkMax={limits?.bulkMax ?? 8}
               busy={settings.mode === "bulk" ? bulk.submitting || bulk.running : single.busy}
               onGenerate={generate}
+              loras={loras}
             />
           </Card>
           <Card title={settings.mode === "bulk" ? "Bulk run" : "Result"}>

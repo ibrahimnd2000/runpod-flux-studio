@@ -1,0 +1,3 @@
+# LoRA training (lora_train.py) and loading LoRAs at generation time. Installed
+# after the weights layer, so changing it never re-downloads or re-pushes 34 GB.
+peft==0.21.2

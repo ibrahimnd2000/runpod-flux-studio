@@ -52,6 +52,7 @@ print(json.dumps({
         "RUNPOD_VIDEO_ENDPOINT_ID": os.environ.get("RUNPOD_VIDEO_ENDPOINT_ID", ""),
         # Optional: open-model agents on a Runpod vLLM endpoint.
         "RUNPOD_LLM_ENDPOINT_ID": os.environ.get("RUNPOD_LLM_ENDPOINT_ID", ""),
+        "RUNPOD_TRAIN_ENDPOINT_ID": os.environ.get("RUNPOD_TRAIN_ENDPOINT_ID", ""),
         "RUNPOD_LLM_MODEL": os.environ.get("RUNPOD_LLM_MODEL", "Qwen/Qwen3-8B"),
         **({"ANTHROPIC_API_KEY": "{{ RUNPOD_SECRET_anthropic_api_key }}"} if os.environ.get("USE_ANTHROPIC_SECRET") == "1" else {}),
         "VIDEO_DAILY_CAP": "20",

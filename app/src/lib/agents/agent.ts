@@ -5,7 +5,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import type { Budget, Contestant, ModelOption, PersonaId } from "../agentTypes";
 import type { GpuCtx } from "./gpu";
 import { createSession, type ToolReply } from "./providers";
-import { addSpend, emit, finishRun, totalUsd, type RunState } from "./runs";
+import { addSpend, emit, finishRun, setPhase, totalUsd, type RunState } from "./runs";
 import { executeTool, toolSpecs } from "./tools";
 
 // The agent loop, shared by the playground and the battleground: the model plans,
@@ -72,7 +72,7 @@ export async function runAgent(run: RunState, model: ModelOption, contestant: Co
     for (let i = 0; i < budget.maxTurns; i++) {
       if (run.aborted) return finishRun(run, "stopped", { text: "Stopped by the user.", mediaIds: produced });
 
-      const turn = await session.turn();
+      const turn = await session.turn((text) => setPhase(run, text));
       addSpend(run, {
         llmUsd: turn.costUsd,
         llmEstimatedUsd: turn.estimated ? turn.costUsd : 0,

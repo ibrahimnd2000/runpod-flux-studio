@@ -93,6 +93,8 @@ export interface RunView {
   error?: string;
   /** Tools and budget ran against placeholder media, not the GPU endpoints. */
   mock: boolean;
+  /** While running: what the run is waiting on right now, e.g. "Waiting for a GPU…" (see setPhase). */
+  phase?: string;
 }
 
 export type RunSummary = Omit<RunView, "events" | "pipeline">;

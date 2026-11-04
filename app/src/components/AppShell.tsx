@@ -1,6 +1,6 @@
 "use client";
 
-import { BookOpen, Bot, Images, Sparkles, Swords, Workflow } from "lucide-react";
+import { BookOpen, Bot, GraduationCap, Images, Sparkles, Swords, Workflow } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
@@ -13,6 +13,7 @@ import { Tooltip } from "./ui/Tooltip";
 const NAV = [
   { href: "/", label: "Studio", icon: Sparkles },
   { href: "/library", label: "Library", icon: Images },
+  { href: "/lora", label: "Fine-tune", icon: GraduationCap },
   { href: "/pipelines", label: "Pipelines", icon: Workflow },
   { href: "/agent", label: "Agent", icon: Bot },
   { href: "/battle", label: "Battleground", icon: Swords },
