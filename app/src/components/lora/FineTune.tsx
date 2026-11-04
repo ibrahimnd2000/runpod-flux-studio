@@ -16,11 +16,12 @@ import { useAccessCode } from "../useAccessCode";
 
 type Preset = keyof LorasView["presets"];
 const PRESET_LABEL: Record<Preset, string> = { quick: "Quick", standard: "Standard", strong: "Strong" };
-// Estimate until measured: seconds per optimizer step at 512 px, rank 16, on an L40S-class GPU,
-// plus ~2 min of model load and caption/image encoding.
-const EST_S_PER_STEP = 1.4;
-const EST_OVERHEAD_S = 120;
-const EST_USD_PER_S = 0.00053;
+// Measured 4 Nov 2026 (one run, README): 800 steps at 512 px, rank 16, on an RTX 6000 Ada took
+// 641 s of training (0.80 s/step) + 24 s of download, encoding and upload = 665 s of GPU time, $0.323.
+// Queue time (a cold worker pulls a 30 GB image, ~5 min) isn't billed and isn't included.
+const EST_S_PER_STEP = 0.8;
+const EST_OVERHEAD_S = 25;
+const EST_USD_PER_S = 0.323 / 665;
 
 /** "Mug shots" -> "mug_shots": a starting point for the trigger word. */
 const triggerFrom = (name: string) =>
@@ -256,7 +257,7 @@ export default function FineTune() {
                 />
               </div>
               <p className="text-right font-mono text-[11px] text-subtle">
-                ≈ {Math.round(estS / 60)} min · ≈ {usd(estS * EST_USD_PER_S)} <span className="font-sans">(estimate)</span>
+                ≈ {Math.round(estS / 60)} min GPU · ≈ {usd(estS * EST_USD_PER_S)} <span className="font-sans">(estimate from a measured run; plus queue time)</span>
               </p>
             </div>
 
@@ -324,7 +325,7 @@ export default function FineTune() {
             <p className="text-sm text-subtle">Loading…</p>
           ) : view.loras.length === 0 ? (
             <EmptyState icon={<GraduationCap className="h-7 w-7" />} title="No LoRAs yet">
-              Pick images on the left and start a training. It takes roughly 10-30 minutes.
+              Pick images on the left and start a training. 800 steps took 11 minutes of GPU time (about $0.32), plus a few minutes waiting for a GPU.
             </EmptyState>
           ) : (
             <div className="space-y-3">
