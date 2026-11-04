@@ -30,6 +30,9 @@ export const config = {
   // A clip costs ~10x an image, so videos get their own, smaller daily cap.
   videoDailyCap: int("VIDEO_DAILY_CAP", 20),
   videoMaxFrames: int("VIDEO_MAX_FRAMES", 121),
+  // LoRA fine-tuning: same worker image as the image endpoint, task "train_lora".
+  trainEndpointId: process.env.RUNPOD_TRAIN_ENDPOINT_ID ?? "",
+  loraDailyCap: int("LORA_DAILY_CAP", 3),
   // Job history survives restarts when this points at a persistent volume.
   dataDir: process.env.DATA_DIR ?? "",
 };

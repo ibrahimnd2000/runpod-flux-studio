@@ -17,6 +17,8 @@ export interface GenerateInput {
   num_inference_steps: number;
   guidance_scale: number;
   seed?: number;
+  /** A ready LoRA from /lora and its strength (0-2). */
+  lora?: { id: string; scale: number };
 }
 
 /** The `worker` block returned by workers/image/handler.py. */
@@ -180,4 +182,37 @@ export interface VideoJobView {
   };
   costUsd?: number;
   error?: string;
+}
+
+// --------------------------------------------------------------------------- //
+//                                   LoRA                                      //
+// --------------------------------------------------------------------------- //
+export interface LoraView {
+  id: string;
+  name: string;
+  /** Word the captions started with; put it in a prompt to invoke the LoRA. */
+  trigger: string;
+  status: "training" | "ready" | "failed";
+  createdAt: number;
+  imageIds: string[];
+  steps: number;
+  rank: number;
+  resolution: number;
+  jobId?: string;
+  progress?: { step: number; total_steps: number; loss?: number };
+  delayMs?: number;
+  executionMs?: number;
+  gpu?: string;
+  costUsd?: number;
+  finalLoss?: number;
+  timings?: Record<string, number>;
+  bytes?: number;
+  error?: string;
+}
+
+export interface LorasView {
+  loras: LoraView[];
+  enabled: boolean;
+  limits: { minImages: number; maxImages: number; minSteps: number; maxSteps: number; dailyCap: number };
+  presets: Record<"quick" | "standard" | "strong", number>;
 }

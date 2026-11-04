@@ -5,8 +5,9 @@ import { randomUUID } from "node:crypto";
 import { config, videoModels } from "../config";
 import { refreshImageJob } from "../imageJobs";
 import { checkAccess, checkVideoAccess, LimitError, sanitizeAnimate, sanitizeInput } from "../limits";
+import { submitImage } from "../loras";
 import { getMediaItem, readMedia, saveMedia } from "../media";
-import { submitJob, submitVideoJob } from "../runpod";
+import { submitVideoJob } from "../runpod";
 import { addPending, noteIp } from "../store";
 import { TERMINAL } from "../types";
 import { refreshVideoJob } from "../videoJobs";
@@ -115,7 +116,7 @@ export async function generateImages(
       input.seed = base + i;
       let id: string;
       try {
-        id = (await submitJob(input)).id;
+        id = (await submitImage(input)).id;
       } catch (e) {
         console.error("agent image submit failed", e);
         return { prompt: input.prompt, costUsd: 0, error: "Could not submit the job to Runpod." };

@@ -1,6 +1,6 @@
 import { config } from "@/lib/config";
 import { checkAccess, clientIp, LimitError, readJson, sanitizeInput } from "@/lib/limits";
-import { submitJob } from "@/lib/runpod";
+import { submitImage } from "@/lib/loras";
 import { addPending, noteIp } from "@/lib/store";
 import type { GenerateInput } from "@/lib/types";
 
@@ -29,7 +29,7 @@ export async function POST(req: Request) {
     const base = Math.floor(Math.random() * 2 ** 31);
     inputs.forEach((input, i) => (input.seed = base + i));
 
-    const results = await Promise.allSettled(inputs.map((input) => submitJob(input)));
+    const results = await Promise.allSettled(inputs.map((input) => submitImage(input)));
     const jobs = results.map((r, i) => {
       if (r.status === "fulfilled") {
         addPending(r.value.id, inputs[i], ip);

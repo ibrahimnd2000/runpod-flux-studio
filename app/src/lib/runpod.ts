@@ -36,12 +36,22 @@ export interface RunpodStatus {
   error?: string;
 }
 
-export function submitJob(input: GenerateInput) {
+/** `lora` here is what handler.py reads: the adapter's id, a URL to fetch it from, and its scale. */
+export function submitJob(input: Omit<GenerateInput, "lora">, lora?: { id: string; url: string; scale: number }) {
   // JPEG keeps the browser payload small (a 1024² PNG is ~1.5 MB of base64).
   return call<{ id: string; status: JobStatus }>(`${JOBS_API}/${config.endpointId}/run`, {
     method: "POST",
-    body: JSON.stringify({ input: { ...input, image_format: "jpeg" } }),
+    body: JSON.stringify({ input: { ...input, image_format: "jpeg", ...(lora ? { lora } : {}) } }),
   });
+}
+
+/** A LoRA training job on the training endpoint (handler.py task "train_lora"). */
+export function submitTrainJob(input: Record<string, unknown>) {
+  return call<{ id: string; status: JobStatus }>(`${JOBS_API}/${config.trainEndpointId}/run`, { method: "POST", body: JSON.stringify({ input }) });
+}
+
+export function trainJobStatus(id: string) {
+  return call<RunpodStatus>(`${JOBS_API}/${config.trainEndpointId}/status/${encodeURIComponent(id)}`);
 }
 
 export function jobStatus(id: string) {
