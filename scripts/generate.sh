@@ -16,14 +16,18 @@ mkdir -p "$(dirname "$OUT")"
 
 BODY=$(python3 -c 'import json,sys; print(json.dumps({"input": {"prompt": sys.argv[1], "seed": 42}}))' "$PROMPT")
 
-RESP=$(curl -sS -X POST "https://api.runpod.ai/v2/${RUNPOD_IMAGE_ENDPOINT_ID}/runsync" \
+# The response carries the image as ~1.5 MB of base64: too big for an env var or argument
+# ("Argument list too long" on macOS), so it goes through a temp file.
+RESP=$(mktemp)
+trap 'rm -f "$RESP"' EXIT
+curl -sS -X POST "https://api.runpod.ai/v2/${RUNPOD_IMAGE_ENDPOINT_ID}/runsync" \
   -H "Authorization: Bearer ${RUNPOD_API_KEY}" \
   -H "Content-Type: application/json" \
-  -d "$BODY")
+  -d "$BODY" -o "$RESP"
 
-RESP="$RESP" python3 - "$OUT" <<'PY'
-import base64, json, os, sys
-r = json.loads(os.environ["RESP"])
+python3 - "$OUT" "$RESP" <<'PY'
+import base64, json, sys
+r = json.load(open(sys.argv[2]))
 if r.get("status") != "COMPLETED":
     sys.exit(f"job {r.get('id')} status={r.get('status')} error={r.get('error') or r.get('output')}")
 out = r["output"]
