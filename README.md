@@ -493,6 +493,7 @@ bench/             bench.py (Runpod delayTime/executionTime, cost), prices.yaml,
 app/               Next.js 16 app: Studio, bulk, library, Animate, dashboards, Pipelines, Agent, Battleground, Fine-tune
 scripts/           build_and_push.sh, deploy.sh (image endpoint), deploy_video.sh, deploy_video_wan.sh,
                    deploy_llm.sh (vLLM agent endpoint), deploy_train.sh (LoRA training endpoint), deploy_app.sh (app pod),
+                   warm_demo.sh (active workers + fallback GPU pools while people review the demo),
                    generate.sh, curl examples
 postman/           Postman collection: image runsync/run/status/errors/health, video run/status/errors/health
 docs/              architecture, benchmarks, example requests/responses, screenshots
