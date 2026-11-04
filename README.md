@@ -299,9 +299,11 @@ measured. Alternatives:
 
 Layer order (deps → weights → code) means a handler change pushes a few KB; v0.1.0 → v0.2.0 took 5 s.
 
-**4. Workers: min 0, max 2, idle timeout 60 s, FlashBoot on.** Min 0 means no idle spend for a demo. 60 s keeps
-a worker warm across a user's burst of edits (0.1 s queue instead of 35–93 s). Max 2 lets the autoscaler run
-jobs in parallel (the app's bulk mode shows the speed-up) and caps the worst-case spend at about $3.50/h. For a
+**4. Workers: min 0, max 2 (now 1), idle timeout 60 s, FlashBoot on.** Min 0 means no idle spend for a demo. 60 s keeps
+a worker warm across a user's burst of edits (0.1 s queue instead of 35–93 s). Max 2 let the autoscaler run
+jobs in parallel (the app's bulk mode shows the speed-up) and capped the worst-case spend at about $3.50/h. The
+account's quota is 5 workers across all endpoints, so I later lowered it to 1 to free a slot for the LoRA
+training endpoint; bulk jobs now queue one after another. For a
 production interactive path I'd run **1 active worker** (always on; Runpod's pricing page offers discounts for
 active workers on request) so the first request
 of the day never sees a cold start, and keep the flex workers for bursts.
