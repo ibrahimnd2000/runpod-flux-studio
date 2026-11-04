@@ -199,6 +199,8 @@ export interface LoraView {
   rank: number;
   resolution: number;
   jobId?: string;
+  /** Runpod's status of the training job while status is "training": IN_QUEUE = waiting for a GPU. */
+  jobStatus?: JobStatus;
   progress?: { step: number; total_steps: number; loss?: number };
   delayMs?: number;
   executionMs?: number;

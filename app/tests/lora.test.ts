@@ -102,7 +102,11 @@ describe("the training lifecycle", () => {
     const lora = (await list()).loras.find((l) => l.status === "training")!;
     const token = String(fake.submitted.at(-1)!.input.upload_token);
 
-    expect((await list()).loras.find((l) => l.id === lora.id)?.progress).toEqual({ step: 40, total_steps: 400, loss: 0.31 });
+    // Queued: no GPU yet, and the record says so (not "training").
+    fake.status = { status: "IN_QUEUE" };
+    expect((await list()).loras.find((l) => l.id === lora.id)).toMatchObject({ status: "training", jobStatus: "IN_QUEUE" });
+    fake.status = { status: "IN_PROGRESS", output: { step: 40, total_steps: 400, loss: 0.31 } };
+    expect((await list()).loras.find((l) => l.id === lora.id)).toMatchObject({ jobStatus: "IN_PROGRESS", progress: { step: 40, total_steps: 400, loss: 0.31 } });
     expect((await put(lora.id, null, new Uint8Array([1]))).status).toBe(403);
     expect((await put(lora.id, "f".repeat(48), new Uint8Array([1]))).status).toBe(403);
     expect((await put(lora.id, token, new Uint8Array(0))).status).toBe(413);
@@ -116,6 +120,7 @@ describe("the training lifecycle", () => {
     expect(done).toMatchObject({ status: "ready", finalLoss: 0.21, gpu: "NVIDIA L40S", executionMs: 600_000, bytes: weights.length });
     expect(done.costUsd).toBeGreaterThan(0);
     expect(done.progress).toBeUndefined();
+    expect(done.jobStatus).toBeUndefined();
 
     // The token is spent: no second upload.
     expect((await put(lora.id, token, weights)).status).toBe(403);

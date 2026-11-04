@@ -5,7 +5,7 @@ import { LimitError } from "../limits";
 import { readMedia } from "../media";
 import { animateImage, generateImages, MEASURED, type GpuCtx } from "./gpu";
 import { complete } from "./providers";
-import { addSpend, emit, finishRun, totalUsd, type RunState } from "./runs";
+import { addSpend, emit, finishRun, setPhase, totalUsd, type RunState } from "./runs";
 import { imageCost } from "./tools";
 
 // Deterministic workflows: a list of steps whose dependencies form a DAG. A step
@@ -169,7 +169,7 @@ interface Ctx {
 }
 
 async function llmCall(ctx: Ctx, text: string, images?: { mime: "image/jpeg"; data: string }[]) {
-  const t = await complete(ctx.llm, LLM_SYSTEM, { text, images });
+  const t = await complete(ctx.llm, LLM_SYSTEM, { text, images }, undefined, (phase) => setPhase(ctx.run, phase));
   addSpend(ctx.run, {
     llmUsd: t.costUsd,
     llmEstimatedUsd: t.estimated ? t.costUsd : 0,

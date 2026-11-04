@@ -26,10 +26,19 @@ const EST_USD_PER_S = 0.00053;
 const triggerFrom = (name: string) =>
   name.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^[^a-z]+|_+$/g, "").slice(0, 20) || "";
 
+/** Where a training LoRA really is: queued for a GPU, loading on one, or training. */
+function trainingPhase(lora: LoraView): { badge: string; detail: string; onGpu: boolean } {
+  const p = lora.progress;
+  if (p) return { badge: "training", detail: `step ${p.step}/${p.total_steps}${p.loss !== undefined ? ` · loss ${p.loss.toFixed(3)}` : ""}`, onGpu: true };
+  if (lora.jobStatus === "IN_PROGRESS") return { badge: "starting", detail: "on a GPU · loading FLUX and encoding the images…", onGpu: true };
+  return { badge: "waiting for GPU", detail: "waiting for a training GPU (the first start pulls a 30 GB image, ~10 min)…", onGpu: false };
+}
+
 function StatusBadge({ lora }: { lora: LoraView }) {
   if (lora.status === "ready") return <Badge tone="green">ready</Badge>;
   if (lora.status === "failed") return <Badge tone="red">failed</Badge>;
-  return <Badge tone="blue">{lora.progress ? "training" : "queued"}</Badge>;
+  const ph = trainingPhase(lora);
+  return <Badge tone={ph.onGpu ? "blue" : "neutral"}>{ph.badge}</Badge>;
 }
 
 function LoraCard({ lora, now, onDelete, deleting }: { lora: LoraView; now: number; onDelete: () => void; deleting: boolean }) {
@@ -55,7 +64,7 @@ function LoraCard({ lora, now, onDelete, deleting }: { lora: LoraView; now: numb
             <div className="h-full bg-accent transition-all" style={{ width: `${p ? (100 * p.step) / p.total_steps : 2}%` }} />
           </div>
           <p className="flex justify-between font-mono text-[11px] text-subtle">
-            <span>{p ? `step ${p.step}/${p.total_steps}${p.loss !== undefined ? ` · loss ${p.loss.toFixed(3)}` : ""}` : "waiting for a training GPU…"}</span>
+            <span>{trainingPhase(lora).detail}</span>
             <span>{now ? secs(now - lora.createdAt, 0) : ""}</span>
           </p>
         </div>
@@ -304,7 +313,7 @@ export default function FineTune() {
                 autoComplete="off"
               />
               <Button variant="primary" size="lg" loading={starting} disabled={!canStart} icon={<GraduationCap className="h-4 w-4" />} onClick={start}>
-                {training ? "A LoRA is training…" : "Start training"}
+                {training ? "Another LoRA is in progress…" : "Start training"}
               </Button>
             </div>
           </div>

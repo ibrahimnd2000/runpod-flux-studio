@@ -289,15 +289,20 @@ describe("GET /api/endpoint and /api/history", () => {
 
 describe("agent tools on the real GPU path", () => {
   it("generate_images submits real jobs, waits for them and charges the measured cost", async () => {
-    fake.pollsToFinish = 1;
+    fake.pollsToFinish = 2; // one "generating" answer per job, then the image
     const run = createRun({ kind: "agent", title: "t", brief: "b", budget: { maxUsd: 1, maxImages: 4, maxVideos: 0, maxTurns: 4 }, mock: false });
     const before = fake.submitted.length;
+    const phases: (string | undefined)[] = [];
     const o = await executeTool(
       { id: "c1", name: "generate_images", args: { prompts: ["a red bicycle", "a blue bicycle"] } },
       run,
-      { code: "test-code", ip: "198.51.100.9", dryRun: false, aborted: () => false },
+      { code: "test-code", ip: "198.51.100.9", dryRun: false, aborted: () => false, phase: (t) => phases.push(t) },
       false,
     );
+    // The trace says "waiting for a GPU" until a worker takes the jobs, then "generating", then clears.
+    expect(phases[0]).toMatch(/^Waiting for a GPU \(2 images queued/);
+    expect(phases.some((t) => /^Generating \d images? on the GPU/.test(t ?? ""))).toBe(true);
+    expect(phases.at(-1)).toBeUndefined();
     expect(o.reply.isError).toBeFalsy();
     expect(fake.submitted.length - before).toBe(2);
     const body = JSON.parse(o.reply.content);

@@ -51,8 +51,11 @@ export interface Turn {
   ms: number;
 }
 
+/** Live status for the run's trace, e.g. while a cold LLM worker starts; no text clears it. */
+export type OnPhase = (text?: string) => void;
+
 export interface LlmSession {
-  turn(): Promise<Turn>;
+  turn(onPhase?: OnPhase): Promise<Turn>;
   reply(results: ToolReply[]): void;
 }
 
@@ -102,8 +105,8 @@ export function createSession(
 }
 
 /** One call, no tools: for pipeline llm/pick steps. */
-export async function complete(opt: ModelOption, system: string, user: UserContent, maxTokens = 8000): Promise<Turn> {
-  return createSession(opt, system, user, [], maxTokens).turn();
+export async function complete(opt: ModelOption, system: string, user: UserContent, maxTokens = 8000, onPhase?: OnPhase): Promise<Turn> {
+  return createSession(opt, system, user, [], maxTokens).turn(onPhase);
 }
 
 // --------------------------------------------------------------------------- //
@@ -223,7 +226,7 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
  * 300 s). A job still unfinished at the deadline is cancelled so no worker keeps
  * running for it.
  */
-async function vllmChat(body: unknown): Promise<OaiCompletion> {
+async function vllmChat(body: unknown, onPhase?: OnPhase): Promise<OaiCompletion> {
   const base = `https://api.runpod.ai/v2/${llmEndpoint}`;
   const headers = { Authorization: `Bearer ${config.apiKey}`, "Content-Type": "application/json" };
   const call = async (path: string, init?: RequestInit) => {
@@ -238,6 +241,8 @@ async function vllmChat(body: unknown): Promise<OaiCompletion> {
   for (let wait = 0; ; wait = Math.min(wait + 500, 3000)) {
     if (wait) await sleep(wait);
     const s = (await call(`/status/${encodeURIComponent(job.id)}`)) as { status: string; output?: unknown; error?: string };
+    // Only a queued job is worth calling out: a warm worker answers in about a second.
+    onPhase?.(s.status === "IN_QUEUE" && wait ? `${llmModel}: waiting for a GPU worker (a cold start takes ~3 min)…` : undefined);
     if (s.status === "COMPLETED") {
       const out = Array.isArray(s.output) ? s.output[0] : s.output;
       if (!out || typeof out !== "object" || !("choices" in out)) throw new Error(`Runpod vLLM returned no completion: ${JSON.stringify(s.output).slice(0, 200)}`);
@@ -267,7 +272,7 @@ class VllmSession implements LlmSession {
     ];
   }
 
-  async turn(): Promise<Turn> {
+  async turn(onPhase?: OnPhase): Promise<Turn> {
     const started = Date.now();
     const body = {
       model: llmModel,
@@ -282,7 +287,7 @@ class VllmSession implements LlmSession {
       // Qwen3: skip the long <think> phase; tool calls are the agent's reasoning here.
       chat_template_kwargs: { enable_thinking: false },
     };
-    const data = await vllmChat(body);
+    const data = await vllmChat(body, onPhase).finally(() => onPhase?.());
     const msg = data.choices[0]?.message ?? { role: "assistant", content: "" };
     this.messages.push({ role: "assistant", content: msg.content ?? "", ...(msg.tool_calls?.length ? { tool_calls: msg.tool_calls } : {}) });
 

@@ -87,6 +87,14 @@ export function emit(state: RunState, event: NewRunEvent) {
   events.push({ ...event, seq: events.length, t: Date.now() } as RunEvent);
 }
 
+/**
+ * What the run is waiting on right now (a queued GPU job, a cold LLM worker), shown
+ * live in the trace so a queued job never reads as "running". Cleared with no text.
+ */
+export function setPhase(state: RunState, text?: string) {
+  if (state.view.status === "running") state.view.phase = text;
+}
+
 export function addSpend(state: RunState, delta: Partial<Spend>) {
   const s = state.view.spend;
   for (const [k, v] of Object.entries(delta) as [keyof Spend, number][]) s[k] += v;
@@ -97,7 +105,7 @@ export const totalUsd = (s: Spend) => s.gpuUsd + s.llmUsd;
 export function finishRun(state: RunState, status: RunStatus, result?: RunResult, error?: string) {
   const v = state.view;
   if (v.status !== "running") return;
-  Object.assign(v, { status, finishedAt: Date.now(), result, error });
+  Object.assign(v, { status, finishedAt: Date.now(), result, error, phase: undefined });
   store.done.set(v.id, v);
   store.live.delete(v.id);
   while (store.done.size > MAX_KEPT) store.done.delete(store.done.keys().next().value!);

@@ -5,7 +5,7 @@ import { config } from "../config";
 import { checkCode, clientIp, LimitError, startOfUtcDay } from "../limits";
 import type { GpuCtx } from "./gpu";
 import { findModel } from "./providers";
-import { activeRuns, listRuns, MAX_ACTIVE, type RunState } from "./runs";
+import { activeRuns, listRuns, MAX_ACTIVE, setPhase, type RunState } from "./runs";
 
 // Request handling shared by the pipeline, agent and battle routes: access code,
 // concurrency and daily caps, budget clamping, and the GPU context for tools.
@@ -53,6 +53,7 @@ export function gpuContext(req: Request, dryRun: boolean, run?: RunState): GpuCt
     ip: clientIp(req),
     dryRun: dryRun || !gpuConfigured(),
     aborted: () => !!run?.aborted,
+    phase: (text) => run && setPhase(run, text),
   };
 }
 

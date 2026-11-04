@@ -241,6 +241,24 @@ describe("Runpod vLLM session", () => {
     );
     await expect(p.createSession(p.findModel("runpod", "Qwen/Qwen3-8B")!, "S", { text: "b" }, []).turn()).rejects.toThrow(/job failed: CUDA out of memory/);
   });
+
+  it("says it is waiting for a GPU while the job is queued, then clears it", async () => {
+    const p = await load(env);
+    let polls = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        if (url.endsWith("/run")) return Response.json({ id: "j1", status: "IN_QUEUE" });
+        polls++;
+        if (polls < 3) return Response.json({ status: "IN_QUEUE" });
+        return Response.json({ status: "COMPLETED", output: [{ choices: [{ finish_reason: "stop", message: { role: "assistant", content: "hi" } }] }] });
+      }),
+    );
+    const phases: (string | undefined)[] = [];
+    await p.createSession(p.findModel("runpod", "Qwen/Qwen3-8B")!, "S", { text: "b" }, []).turn((t) => phases.push(t));
+    expect(phases).toContain("Qwen/Qwen3-8B: waiting for a GPU worker (a cold start takes ~3 min)…");
+    expect(phases.at(-1)).toBeUndefined();
+  });
 });
 
 describe("scripted session", () => {

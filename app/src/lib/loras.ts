@@ -165,7 +165,7 @@ export async function refreshLora(id: string): Promise<LoraView | null> {
     save(next);
     return view(next);
   }
-  const next: Record_ = { ...r, delayMs: s.delayTime, executionMs: s.executionTime };
+  const next: Record_ = { ...r, jobStatus: s.status, delayMs: s.delayTime, executionMs: s.executionTime };
   if (s.status === "IN_PROGRESS" && s.output && typeof s.output === "object" && "step" in s.output) next.progress = s.output as LoraView["progress"];
   if (!TERMINAL.includes(s.status)) {
     store.items.set(id, next); // progress only: not worth a line in the index
@@ -173,6 +173,7 @@ export async function refreshLora(id: string): Promise<LoraView | null> {
   }
   const out = (s.output ?? {}) as TrainOutput;
   next.progress = undefined;
+  next.jobStatus = undefined;
   next.tokenHash = undefined; // the upload window is over either way
   next.gpu = out.worker?.gpu;
   next.costUsd = requestCost(out.worker?.gpu, s.executionTime);
