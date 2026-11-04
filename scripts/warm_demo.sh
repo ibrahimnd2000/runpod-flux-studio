@@ -6,8 +6,9 @@
 #   scripts/warm_demo.sh status  # workers and queue on both endpoints
 #
 # "on" also adds a bigger fallback pool after the usual ones (80 GB A100s for images, 48 GB for
-# the LLM), so a shortage of one GPU size doesn't leave jobs queued; the fallbacks stay after "off". Video and LoRA training stay at
-# scale-to-zero: they take minutes anyway and the app says so while they wait.
+# the LLM), so a shortage of one GPU size doesn't leave jobs queued; the fallbacks stay after
+# "off". Video and LoRA training stay at scale-to-zero: they take minutes anyway and the app
+# says so while they wait.
 #
 # Cost while on, at Runpod's flex list prices (bench/prices.yaml; active workers may be cheaper):
 #   image worker $1.22-1.75/h on a 48 GB GPU ($2.72/h if placed on an A100), LLM worker up to $1.34/h.
