@@ -286,6 +286,7 @@ prompt box with a strength slider.
 | GPU time (`executionTime`) · **cost** | 665 s · **$0.32** |
 | Adapter | 37.4 MB safetensors · final loss 0.341 |
 | Generating with it (1024², 28 steps) | 19.8 s inference vs 15.9 s without on the same GPU (+25%, one pair; the adapter isn't fused) |
+| From the live Studio ("Use in Studio") | 17.0 s GPU time, **$0.0083** on an L40S; the worker's response echoes the LoRA id and strength |
 
 <table><tr>
 <td><img src="docs/examples/lora-off.jpg" width="300" alt="Lighthouse at night without the LoRA"></td>
