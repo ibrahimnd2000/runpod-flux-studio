@@ -8,8 +8,8 @@
 #     --secret id=hf_token,env=HF_TOKEN \
 #     -t <registry>/<user>/flux-worker:<tag> workers/image
 #
-# Stages: deps -> weights (~34 GB) -> final (code). Editing handler.py rebuilds
-# and re-pushes only the last, few-KB layer. `--target check` builds deps plus
+# Stages: deps -> weights (~34 GB) -> final (LoRA deps + code). Editing handler.py
+# or lora_train.py rebuilds and re-pushes only the last, few-KB layer. `--target check` builds deps plus
 # the code without weights or a token, which is what CI runs.
 
 FROM pytorch/pytorch:2.14.1-cuda12.6-cudnn9-runtime AS deps
@@ -31,9 +31,12 @@ RUN python -c "import torch; print('torch==' + torch.__version__)" > /tmp/torch-
 
 # CI-only: proves the pinned stack imports on the real base image.
 FROM deps AS check
-COPY handler.py .
-RUN python -c "import diffusers, transformers, torchao; from diffusers import FluxPipeline; \
-print('diffusers', diffusers.__version__, 'transformers', transformers.__version__)" \
+COPY requirements-train.txt .
+RUN pip install -r requirements-train.txt -c /tmp/torch-constraint.txt
+COPY handler.py lora_train.py ./
+RUN python -c "import diffusers, transformers, torchao, peft; from diffusers import FluxPipeline; \
+from diffusers.training_utils import cast_training_params; from peft.utils import get_peft_model_state_dict; \
+print('diffusers', diffusers.__version__, 'transformers', transformers.__version__, 'peft', peft.__version__)" \
     && MOCK_PIPELINE=1 python -c "import handler"
 
 
@@ -60,6 +63,9 @@ ENV HF_HUB_OFFLINE=1 \
     TRANSFORMERS_OFFLINE=1 \
     MODEL_PRECISION=bf16
 
-COPY handler.py .
+COPY requirements-train.txt .
+RUN pip install -r requirements-train.txt -c /tmp/torch-constraint.txt
+
+COPY handler.py lora_train.py ./
 
 CMD ["python", "-u", "handler.py"]
