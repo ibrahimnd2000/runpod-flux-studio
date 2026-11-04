@@ -123,6 +123,13 @@ describe("POST /api/generate + GET /api/jobs/[id]", () => {
     for (const s of fake.submitted) expect(JSON.stringify(s.body)).not.toContain("rp-test");
   });
 
+  it("answers a malformed body with a 400, not a Runpod error", async () => {
+    const bad = new Request("http://test/api", { method: "POST", headers: { "content-type": "application/json", "x-access-code": "test-code", "x-forwarded-for": "198.51.100.20" }, body: "{oops" });
+    const r = await generate.POST(bad);
+    expect(r.status).toBe(400);
+    expect((await r.json()).error).toMatch(/JSON object/);
+  });
+
   it("rejects bad codes, empty prompts, unknown jobs and Runpod outages", async () => {
     expect((await generate.POST(req({ prompt: "x" }, "nope"))).status).toBe(401);
     expect((await generate.POST(req({ prompt: " " }))).status).toBe(400);

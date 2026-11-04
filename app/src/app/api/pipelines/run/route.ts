@@ -3,13 +3,13 @@ import { runPipeline, validateSpec } from "@/lib/agents/pipeline";
 import { findModel } from "@/lib/agents/providers";
 import { checkRunAccess, errorResponse, gpuContext, parseBudget } from "@/lib/agents/request";
 import { createRun } from "@/lib/agents/runs";
-import { LimitError } from "@/lib/limits";
+import { LimitError, readJson } from "@/lib/limits";
 
 // Starts a pipeline run (a template or a user-edited spec) in the background.
 export async function POST(req: Request) {
   try {
     checkRunAccess(req);
-    const body = (await req.json()) as { spec?: PipelineSpec; inputs?: Record<string, unknown>; budget?: unknown; dryRun?: boolean };
+    const body = await readJson<{ spec?: PipelineSpec; inputs?: Record<string, unknown>; budget?: unknown; dryRun?: boolean }>(req);
     if (!body.spec) throw new LimitError("Missing pipeline.", 400);
     const spec = validateSpec(body.spec);
     const llm = findModel(spec.llm?.provider, String(spec.llm?.model ?? ""));

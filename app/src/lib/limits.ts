@@ -20,6 +20,17 @@ export class LimitError extends Error {
   }
 }
 
+/** The JSON body of a request; a malformed or missing body is the caller's mistake (400), not ours. */
+export async function readJson<T = unknown>(req: Request): Promise<T> {
+  try {
+    const body = await req.json();
+    if (body === null || typeof body !== "object" || Array.isArray(body)) throw new Error("not an object");
+    return body as T;
+  } catch {
+    throw new LimitError("The request body must be a JSON object.", 400);
+  }
+}
+
 export function clientIp(req: Request): string {
   return req.headers.get("x-forwarded-for")?.split(",")[0].trim() || req.headers.get("x-real-ip") || "unknown";
 }

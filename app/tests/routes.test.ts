@@ -16,6 +16,8 @@ const stop = await import("@/app/api/runs/[id]/stop/route");
 const battles = await import("@/app/api/battles/route");
 const battleById = await import("@/app/api/battles/[id]/route");
 const vote = await import("@/app/api/battles/[id]/vote/route");
+const mediaList = await import("@/app/api/media/route");
+const judge = await import("@/app/api/battles/[id]/judge/route");
 
 const post = (body: unknown, code: string | null = "test-code") =>
   new Request("http://test/api", {
@@ -55,6 +57,19 @@ describe("POST /api/agents/run", () => {
     expect((await agentRun.POST(post({ brief: "a red bicycle", contestant: scripted }, "wrong"))).status).toBe(401);
   });
 
+  it("answers a malformed body with a 400, on every POST route", async () => {
+    const bad = (body: string) =>
+      new Request("http://test/api", { method: "POST", headers: { "content-type": "application/json", "x-access-code": "test-code" }, body });
+    for (const route of [agentRun.POST, pipelineRun.POST, battles.POST]) {
+      for (const body of ["{oops", "[1]", "null"]) {
+        const r = await route(bad(body));
+        expect(r.status).toBe(400);
+        expect((await r.json()).error).toMatch(/JSON object/);
+      }
+    }
+    expect((await vote.POST(bad("{oops"), params("bat_x"))).status).toBe(400);
+  });
+
   it("validates the brief and the model", async () => {
     expect((await agentRun.POST(post({ brief: "hi", contestant: scripted }))).status).toBe(400);
     const r = await agentRun.POST(post({ brief: "a red bicycle in Paris", contestant: { provider: "claude", model: "claude-opus-5-5" } }));
@@ -73,6 +88,15 @@ describe("POST /api/agents/run", () => {
     expect(v.budget.maxTurns).toBeGreaterThanOrEqual(1);
     // Every media id the run mentions is described for the browser.
     for (const m of v.result!.mediaIds) expect(v.media[m]?.kind).toBe("image");
+  });
+
+  it("keeps dry-run placeholders out of the library", async () => {
+    const { id } = await (await agentRun.POST(post({ brief: "a teal vintage scooter", contestant: scripted }))).json();
+    const v = await poll(id);
+    const ids = v.result!.mediaIds;
+    expect(ids.length).toBeGreaterThan(0);
+    const library = (await (await mediaList.GET()).json()) as { items: { id: string }[] };
+    expect(library.items.filter((i) => ids.includes(i.id))).toEqual([]);
   });
 });
 
@@ -142,6 +166,13 @@ describe("battles", () => {
     const board = await (await battles.GET()).json();
     expect(board.battles[0].id).toBe(b.id);
     expect(board.leaderboard[0]).toMatchObject({ wins: 1, contestant: { persona: "frugal" } });
+  });
+
+  it("re-judging needs the code and a configured judge", async () => {
+    expect((await judge.POST(post({}, null), params("bat_x"))).status).toBe(401);
+    const r = await judge.POST(post({}), params("bat_x"));
+    expect(r.status).toBe(409); // no ANTHROPIC_API_KEY in tests
+    expect((await r.json()).error).toMatch(/can't be judged/);
   });
 
   it("404s unknown battles", async () => {

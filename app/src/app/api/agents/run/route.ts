@@ -1,13 +1,14 @@
 import { runAgent } from "@/lib/agents/agent";
 import { checkRunAccess, errorResponse, gpuContext, parseBrief, parseBudget, parseContestant } from "@/lib/agents/request";
 import { createRun } from "@/lib/agents/runs";
+import { readJson } from "@/lib/limits";
 
 // Starts an agent run in the background and returns its id; the browser polls
 // /api/runs/[id] for the trace.
 export async function POST(req: Request) {
   try {
     checkRunAccess(req);
-    const body = (await req.json()) as Record<string, unknown>;
+    const body = await readJson<Record<string, unknown>>(req);
     const brief = parseBrief(body.brief);
     const { contestant, model } = parseContestant(body.contestant);
     const budget = parseBudget(body.budget);

@@ -1,5 +1,5 @@
 import { config } from "@/lib/config";
-import { checkAccess, clientIp, LimitError, sanitizeInput } from "@/lib/limits";
+import { checkAccess, clientIp, LimitError, readJson, sanitizeInput } from "@/lib/limits";
 import { submitJob } from "@/lib/runpod";
 import { addPending, noteIp } from "@/lib/store";
 import type { GenerateInput } from "@/lib/types";
@@ -10,7 +10,7 @@ import type { GenerateInput } from "@/lib/types";
 export async function POST(req: Request) {
   const ip = clientIp(req);
   try {
-    const body = (await req.json()) as Record<string, unknown>;
+    const body = await readJson<Record<string, unknown>>(req);
     const prompts = (Array.isArray(body.prompts) ? body.prompts : [])
       .map((p) => (typeof p === "string" ? p.trim() : ""))
       .filter(Boolean);

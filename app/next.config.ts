@@ -8,11 +8,23 @@ const nextConfig: NextConfig = {
   // deploy. Pages are tiny; always revalidate them. Hashed /_next/static assets
   // stay immutable.
   async headers() {
-    return ["/", "/library", "/about", "/pipelines", "/agent", "/battle"].map((source) => ({
+    const pages = ["/", "/library", "/about", "/pipelines", "/agent", "/battle"].map((source) => ({
       source,
       headers: [{ key: "Cache-Control", value: "public, max-age=0, must-revalidate" }],
     }));
+    // Baseline hardening for a public demo: no MIME sniffing of served media, no
+    // framing by other sites, no full URLs (with ?run= ids) leaked as referrers.
+    const security = {
+      source: "/:path*",
+      headers: [
+        { key: "X-Content-Type-Options", value: "nosniff" },
+        { key: "X-Frame-Options", value: "SAMEORIGIN" },
+        { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+      ],
+    };
+    return [security, ...pages];
   },
+  poweredByHeader: false,
   cacheComponents: true,
   partialPrefetching: true,
   turbopack: {

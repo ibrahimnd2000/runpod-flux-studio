@@ -4,6 +4,7 @@ import type { Side } from "@/lib/agentTypes";
 import { leaderboard, startBattle } from "@/lib/agents/battle";
 import { checkRunAccess, errorResponse, gpuContext, parseBrief, parseBudget, parseContestant } from "@/lib/agents/request";
 import { listBattles } from "@/lib/agents/runs";
+import { readJson } from "@/lib/limits";
 
 export async function GET() {
   await connection();
@@ -14,7 +15,7 @@ export async function GET() {
 export async function POST(req: Request) {
   try {
     checkRunAccess(req, 2);
-    const body = (await req.json()) as Record<string, unknown>;
+    const body = await readJson<Record<string, unknown>>(req);
     const brief = parseBrief(body.brief);
     const budget = parseBudget(body.budget);
     const a = parseContestant(body.a);

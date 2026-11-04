@@ -1,4 +1,4 @@
-import { checkAccess, clientIp, LimitError, sanitizeInput } from "@/lib/limits";
+import { checkAccess, clientIp, LimitError, readJson, sanitizeInput } from "@/lib/limits";
 import { submitJob } from "@/lib/runpod";
 import { addPending, noteIp } from "@/lib/store";
 
@@ -8,7 +8,7 @@ export async function POST(req: Request) {
   const ip = clientIp(req);
   try {
     checkAccess(req.headers.get("x-access-code"), ip);
-    const input = sanitizeInput(await req.json());
+    const input = sanitizeInput(await readJson(req));
     const job = await submitJob(input);
     addPending(job.id, input, ip);
     noteIp(ip);
