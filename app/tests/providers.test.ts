@@ -142,20 +142,37 @@ describe("Claude session", () => {
 describe("Runpod vLLM session", () => {
   const env = { RUNPOD_LLM_ENDPOINT_ID: "ep123", RUNPOD_API_KEY: "rp-test", RUNPOD_LLM_USD_PER_HOUR: "3.6" };
 
+  /**
+   * A fake Runpod queue: /run takes a job, /status answers IN_QUEUE once and then
+   * the next scripted reply (a completion in the worker's array form, or an HTTP error).
+   * Returns the /run calls, whose bodies carry the OpenAI request.
+   */
   function mockFetch(...replies: { status?: number; body: unknown }[]) {
-    const calls: { url: string; init: RequestInit }[] = [];
+    const runs: { url: string; init: RequestInit; body: Record<string, unknown> }[] = [];
+    const all: string[] = [];
+    let polled = false;
     vi.stubGlobal(
       "fetch",
       vi.fn(async (url: string, init: RequestInit) => {
-        calls.push({ url, init });
-        const r = replies[Math.min(calls.length - 1, replies.length - 1)];
-        return new Response(typeof r.body === "string" ? r.body : JSON.stringify(r.body), { status: r.status ?? 200 });
+        all.push(url);
+        if (url.endsWith("/run")) {
+          runs.push({ url, init, body: JSON.parse(init.body as string).input.openai_input });
+          return Response.json({ id: `job${runs.length}`, status: "IN_QUEUE" });
+        }
+        if (!polled) {
+          polled = true;
+          return Response.json({ status: "IN_QUEUE" });
+        }
+        polled = false;
+        const r = replies[Math.min(runs.length - 1, replies.length - 1)];
+        if (r.status && r.status !== 200) return new Response(typeof r.body === "string" ? r.body : JSON.stringify(r.body), { status: r.status });
+        return Response.json({ status: "COMPLETED", delayTime: 1000, executionTime: 700, output: [r.body] });
       }),
     );
-    return calls;
+    return Object.assign(runs, { all });
   }
 
-  it("calls the endpoint's OpenAI route with tools and parses tool calls", async () => {
+  it("queues the OpenAI request on the endpoint (survives long cold starts) and parses tool calls", async () => {
     const p = await load(env);
     const calls = mockFetch({
       body: {
@@ -169,9 +186,11 @@ describe("Runpod vLLM session", () => {
     const s = p.createSession(p.findModel("runpod", "Qwen/Qwen3-8B")!, "SYS", { text: "Brief" }, [TOOL]);
     const t = await s.turn();
 
-    expect(calls[0].url).toBe("https://api.runpod.ai/v2/ep123/openai/v1/chat/completions");
+    expect(calls[0].url).toBe("https://api.runpod.ai/v2/ep123/run");
+    expect(JSON.parse(calls[0].init.body as string).input.openai_route).toBe("/v1/chat/completions");
+    expect(calls.all.slice(1)).toEqual(["https://api.runpod.ai/v2/ep123/status/job1", "https://api.runpod.ai/v2/ep123/status/job1"]);
     expect((calls[0].init.headers as Record<string, string>).Authorization).toBe("Bearer rp-test");
-    const body = JSON.parse(calls[0].init.body as string);
+    const body = calls[0].body as { tools: unknown[]; messages: unknown[] };
     expect(body).toMatchObject({ model: "Qwen/Qwen3-8B", tool_choice: "auto", chat_template_kwargs: { enable_thinking: false } });
     expect(body.messages).toEqual([{ role: "system", content: "SYS" }, { role: "user", content: "Brief" }]);
     expect(body.tools[0]).toEqual({ type: "function", function: { name: "generate_images", description: "Render", parameters: TOOL.schema } });
@@ -197,7 +216,7 @@ describe("Runpod vLLM session", () => {
     s.reply([{ id: "c1", name: "x", content: '{"ok":true}', images: [{ mime: "image/jpeg", data: "QUJD" }] }]);
     const t = await s.turn();
     expect(t).toMatchObject({ stop: "end", texts: ["All done."] });
-    const msgs = JSON.parse(calls[1].init.body as string).messages;
+    const msgs = calls[1].body.messages as Record<string, unknown>[];
     expect(msgs.at(-1)).toEqual({ role: "tool", tool_call_id: "c1", content: '{"ok":true}' });
     expect(msgs.at(-2)).toMatchObject({ role: "assistant", tool_calls: [{ id: "c1" }] });
   });
@@ -210,6 +229,17 @@ describe("Runpod vLLM session", () => {
     p = await load(env);
     mockFetch({ status: 500, body: "boom" });
     await expect(p.createSession(p.findModel("runpod", "Qwen/Qwen3-8B")!, "S", { text: "b" }, []).turn()).rejects.toThrow(/500: boom/);
+  });
+
+  it("reports a failed worker job with the worker's error", async () => {
+    const p = await load(env);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) =>
+        url.endsWith("/run") ? Response.json({ id: "j1", status: "IN_QUEUE" }) : Response.json({ status: "FAILED", error: "CUDA out of memory" }),
+      ),
+    );
+    await expect(p.createSession(p.findModel("runpod", "Qwen/Qwen3-8B")!, "S", { text: "b" }, []).turn()).rejects.toThrow(/job failed: CUDA out of memory/);
   });
 });
 

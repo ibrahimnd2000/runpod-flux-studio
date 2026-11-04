@@ -42,21 +42,41 @@ export function startBattle(brief: string, budget: Budget, contestants: Record<S
   saveBattle(battle);
 
   void Promise.all(runs).then(async () => {
-    const judge = autoJudge ? judgeOption() : null;
-    if (!judge) return saveBattle({ ...battle, status: "done" });
-    saveBattle({ ...battle, status: "judging" });
-    try {
-      saveBattle({ ...battle, status: "done", judge: await judgeBattle(battle) });
-    } catch (e) {
-      console.error("judge failed", e);
-      const msg = e instanceof Anthropic.APIError ? `Judge API error ${e.status ?? ""}` : "The judge failed.";
-      saveBattle({ ...battle, status: "done", judgeError: msg });
-    }
+    if (!autoJudge || !judgeOption()) return saveBattle({ ...battle, status: "done" });
+    await runJudge(battle);
   });
   return battle;
 }
 
-const SCORE = { type: "integer", minimum: 1, maximum: 10 } as const;
+/** Judges a battle whose agents have finished and stores the verdict, or why there is none. */
+async function runJudge(battle: BattleView): Promise<BattleView> {
+  const rest: BattleView = { ...battle, judge: undefined, judgeError: undefined };
+  saveBattle({ ...rest, status: "judging" });
+  try {
+    const done: BattleView = { ...rest, status: "done", judge: await judgeBattle(battle) };
+    saveBattle(done);
+    return done;
+  } catch (e) {
+    console.error("judge failed", e);
+    // The API's own message says what was wrong with the request (no secrets in it).
+    const msg = e instanceof Anthropic.APIError ? `Judge API error ${e.status ?? ""}: ${e.message}`.slice(0, 300) : "The judge failed.";
+    const failed: BattleView = { ...rest, status: "done", judgeError: msg };
+    saveBattle(failed);
+    return failed;
+  }
+}
+
+/** Judges a finished battle again, e.g. after the judge failed. Null if it can't be judged now. */
+export function rejudgeBattle(id: string): Promise<BattleView> | null {
+  const b = listBattles().find((x) => x.id === id);
+  if (!b || b.status !== "done" || !judgeOption()) return null;
+  return runJudge(b);
+}
+
+// Structured outputs reject numeric bounds (minimum/maximum), so the range is in
+// the description and enforced after parsing.
+const SCORE = { type: "integer", description: "1 (poor) to 10 (excellent)" } as const;
+const clampScore = (n: unknown) => Math.min(10, Math.max(1, Math.round(Number(n) || 1)));
 const SIDE_SCORES = { type: "object", properties: { brief: SCORE, quality: SCORE, efficiency: SCORE }, required: ["brief", "quality", "efficiency"], additionalProperties: false } as const;
 const VERDICT_SCHEMA = {
   type: "object",
@@ -117,6 +137,7 @@ async function judgeBattle(b: BattleView): Promise<JudgeVerdict> {
   if (res.stop_reason === "refusal") throw new Error("judge declined");
   const text = res.content.flatMap((c) => (c.type === "text" ? [c.text] : [])).join("");
   const v = JSON.parse(text) as Omit<JudgeVerdict, "model" | "costUsd">;
+  for (const side of SIDES) for (const k of ["brief", "quality", "efficiency"] as const) v.scores[side][k] = clampScore(v.scores[side][k]);
   const u = res.usage;
   const costUsd = ((u.input_tokens + (u.cache_creation_input_tokens ?? 0) * 1.25 + (u.cache_read_input_tokens ?? 0) * 0.1) * JUDGE_PRICE.inUsd + u.output_tokens * JUDGE_PRICE.outUsd) / 1e6;
   return { ...v, model: res.model, costUsd };

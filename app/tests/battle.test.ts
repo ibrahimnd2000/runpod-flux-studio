@@ -6,6 +6,7 @@ import type { BattleView, Contestant, Side } from "@/lib/agentTypes";
 // itself (mocked Anthropic SDK; it must see the delivered images).
 
 const judgeCalls: Record<string, unknown>[] = [];
+let judgeReply: Record<string, unknown> | Error = {};
 vi.mock("@anthropic-ai/sdk", () => {
   class APIError extends Error {
     status?: number;
@@ -18,10 +19,11 @@ vi.mock("@anthropic-ai/sdk", () => {
       messages: {
         create: async (params: Record<string, unknown>) => {
           judgeCalls.push(params);
+          if (judgeReply instanceof Error) throw judgeReply;
           return {
             model: "claude-opus-5-5",
             stop_reason: "end_turn",
-            content: [{ type: "text", text: JSON.stringify({ reasoning: "B followed the brief.", winner: "b", scores: { a: { brief: 5, quality: 6, efficiency: 7 }, b: { brief: 8, quality: 7, efficiency: 6 } } }) }],
+            content: [{ type: "text", text: JSON.stringify({ reasoning: "B followed the brief.", winner: "b", scores: { a: { brief: 5, quality: 6, efficiency: 7 }, b: { brief: 8, quality: 7, efficiency: 6 } }, ...judgeReply }) }],
             usage: { input_tokens: 5000, output_tokens: 300 },
           };
         },
@@ -31,7 +33,8 @@ vi.mock("@anthropic-ai/sdk", () => {
   return { default: Anthropic };
 });
 
-const { contestantKey, leaderboard, startBattle, voteBattle } = await import("@/lib/agents/battle");
+const sdk = (await import("@anthropic-ai/sdk")).default as unknown as { APIError: new (m: string) => Error & { status?: number } };
+const { contestantKey, leaderboard, rejudgeBattle, startBattle, voteBattle } = await import("@/lib/agents/battle");
 const { createRun, finishRun, getBattle, saveBattle } = await import("@/lib/agents/runs");
 const { findModel } = await import("@/lib/agents/providers");
 
@@ -131,5 +134,37 @@ describe("startBattle", () => {
     // Two images per scripted agent (dry-run placeholders), plus brief and two descriptions.
     expect(content.filter((c) => c.type === "image")).toHaveLength(4);
     expect(content.filter((c) => c.type === "text")).toHaveLength(3);
+  });
+
+  it("sends a schema structured outputs accept (no numeric bounds) and clamps the scores itself", async () => {
+    vi.stubEnv("ANTHROPIC_API_KEY", "sk-test");
+    judgeCalls.length = 0;
+    judgeReply = { scores: { a: { brief: 0, quality: 14, efficiency: 7.6 }, b: { brief: 8, quality: 7, efficiency: 6 } } };
+    const b = startBattle("a lighthouse", budget, { a: C("balanced"), b: C("frugal") }, { a: scripted, b: scripted }, true, () => dry, true);
+    const done = await waitDone(b.id);
+    vi.unstubAllEnvs();
+    judgeReply = {};
+
+    const schema = JSON.stringify((judgeCalls[0].output_config as { format: { schema: unknown } }).format.schema);
+    for (const k of ["minimum", "maximum", "multipleOf", "minLength", "maxLength"]) expect(schema).not.toContain(`"${k}"`);
+    expect(done.judge!.scores.a).toEqual({ brief: 1, quality: 10, efficiency: 8 });
+  });
+
+  it("keeps the API's reason when the judge fails, and can judge again", async () => {
+    vi.stubEnv("ANTHROPIC_API_KEY", "sk-test");
+    const err = new sdk.APIError("output_config.format.schema: 'minimum' is not supported");
+    err.status = 400;
+    judgeReply = err;
+    const b = startBattle("a lighthouse", budget, { a: C("balanced"), b: C("perfectionist") }, { a: scripted, b: scripted }, true, () => dry, true);
+    const failed = await waitDone(b.id);
+    expect(failed.judgeError).toMatch(/^Judge API error 400: .*minimum/);
+
+    judgeReply = {};
+    const again = await rejudgeBattle(b.id)!;
+    vi.unstubAllEnvs();
+    expect(again.judgeError).toBeUndefined();
+    expect(again.judge?.winner).toBe("b");
+    expect(getBattle(b.id)?.judge?.winner).toBe("b");
+    expect(rejudgeBattle("bat_missing")).toBeNull();
   });
 });

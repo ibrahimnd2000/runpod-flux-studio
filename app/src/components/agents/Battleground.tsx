@@ -15,6 +15,7 @@ import { useAccessCode } from "../useAccessCode";
 import { EXAMPLE_BRIEFS, useRunParam } from "./AgentPlayground";
 import RunTrace from "./RunTrace";
 import { BudgetFields, elapsedS, MediaGrid, ModelSelect, RunBar, SpendMeter, StatusBadge, useAgentsConfig, useNow, usePost, useRun } from "./shared";
+import Prose from "../ui/Prose";
 
 const SIDES: Side[] = ["a", "b"];
 const SIDE_STYLE = { a: "text-sky-600 dark:text-sky-400", b: "text-rose-600 dark:text-rose-400" };
@@ -95,7 +96,7 @@ function Arena({ side, run, cfg, contestant, winner }: { side: Side; run: RunPol
           {run.status !== "running" && run.result && (
             <div className="space-y-2 rounded-lg bg-muted/50 p-2.5">
               <MediaGrid ids={run.result.mediaIds.slice(0, 4)} media={run.media} cols="grid-cols-2" />
-              <p className="text-xs whitespace-pre-wrap">{run.result.text}</p>
+              <Prose className="text-xs" text={run.result.text} />
               {run.error && <p className="text-[11px] text-amber-600">{run.error}</p>}
             </div>
           )}
@@ -155,12 +156,21 @@ function Compare({ runs }: { runs: Record<Side, RunPollView | null> }) {
   );
 }
 
-function Verdict({ battle, onVote, voting }: { battle: BattleView; onVote: (v: Side | "tie") => void; voting: boolean }) {
+function Verdict({ battle, onVote, voting, onRejudge, rejudging }: { battle: BattleView; onVote: (v: Side | "tie") => void; voting: boolean; onRejudge?: () => void; rejudging: boolean }) {
   const j = battle.judge;
   return (
     <div className="space-y-4">
       {battle.status === "judging" && <p className="flex items-center gap-2 text-sm text-subtle"><Gavel className="h-4 w-4 animate-bounce" /> The judge is looking at both deliveries…</p>}
-      {battle.judgeError && <Notice tone="warn" title="No verdict">{battle.judgeError}</Notice>}
+      {battle.judgeError && (
+        <Notice tone="warn" title="No verdict">
+          <span className="block">{battle.judgeError}</span>
+          {onRejudge && (
+            <Button size="sm" className="mt-2" loading={rejudging} icon={<Gavel className="h-3.5 w-3.5" />} onClick={onRejudge}>
+              Run the judge again
+            </Button>
+          )}
+        </Notice>
+      )}
       {j && (
         <div className="space-y-3">
           <p className="text-sm">
@@ -190,7 +200,7 @@ function Verdict({ battle, onVote, voting }: { battle: BattleView; onVote: (v: S
               ))}
             </tbody>
           </table>
-          <p className="text-xs whitespace-pre-wrap text-subtle">{j.reasoning}</p>
+          <Prose className="text-xs text-subtle" text={j.reasoning} />
         </div>
       )}
       {battle.status === "done" && (
@@ -218,6 +228,7 @@ export default function Battleground() {
   const [autoJudge, setAutoJudge] = useState(true);
   const [starting, setStarting] = useState(false);
   const [voting, setVoting] = useState(false);
+  const [rejudging, setRejudging] = useState(false);
   const [battleId, setBattleId] = useRunParam("battle");
   const [battle, setBattle] = useBattle(battleId);
   const runA = useRun(battle?.runs.a ?? null).run;
@@ -263,6 +274,15 @@ export default function Battleground() {
     }
   };
 
+  const rejudge = async () => {
+    if (!battle) return;
+    setRejudging(true);
+    remember(code);
+    const res = await post<BattleView>(`/api/battles/${battle.id}/judge`, code);
+    setRejudging(false);
+    if (res) setBattle(res);
+  };
+
   return (
     <div className="mx-auto max-w-7xl space-y-6 p-4 sm:p-6 lg:p-8">
       <header>
@@ -289,12 +309,12 @@ export default function Battleground() {
                 </button>
               ))}
             </div>
-            <div className="grid gap-3 md:grid-cols-2">
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
               {SIDES.map((s) => (
                 <ContestantPicker key={s} cfg={cfg} side={s} value={lineup[s]} onChange={(c) => setPicks({ ...lineup, [s]: c })} />
               ))}
             </div>
-            <div className="grid gap-4 md:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
               <div>
                 <span className="mb-1.5 block text-xs text-subtle">
                   <Term term="budget">Budget per agent</Term>
@@ -324,22 +344,22 @@ export default function Battleground() {
 
       {battle && contestants && (
         <>
-          <div className="grid gap-6 lg:grid-cols-2">
+          <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
             <Arena side="a" run={runA} cfg={cfg} contestant={contestants.a} winner={winner} />
             <Arena side="b" run={runB} cfg={cfg} contestant={contestants.b} winner={winner} />
           </div>
-          <div className="grid gap-6 lg:grid-cols-2">
+          <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
             <Card title="Head to head" actions={<StatusBadge status={battle.status === "judging" ? "judging" : battle.status === "done" ? "done" : battle.status === "failed" ? "failed" : "running"} />}>
               <Compare runs={{ a: runA, b: runB }} />
             </Card>
             <Card title={<span className="flex items-center gap-2"><Gavel className="h-4 w-4" /> Verdict</span>}>
-              {battle.status === "running" ? <p className="text-xs text-subtle">Waiting for both agents to finish…</p> : <Verdict battle={battle} onVote={vote} voting={voting} />}
+              {battle.status === "running" ? <p className="text-xs text-subtle">Waiting for both agents to finish…</p> : <Verdict battle={battle} onVote={vote} voting={voting} onRejudge={cfg?.judge ? rejudge : undefined} rejudging={rejudging} />}
             </Card>
           </div>
         </>
       )}
 
-      <div className="grid gap-6 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
         <Card title={<span className="flex items-center gap-2"><Medal className="h-4 w-4" /> Leaderboard</span>}>
           {!board ? (
             <Skeleton className="h-24" />

@@ -208,6 +208,50 @@ interface OaiMessage {
   tool_call_id?: string;
 }
 
+type OaiCompletion = {
+  choices: { message: OaiMessage; finish_reason: string }[];
+  usage?: { prompt_tokens: number; completion_tokens: number };
+};
+
+const VLLM_TIMEOUT_MS = 10 * 60_000;
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * One chat completion on the vLLM endpoint, through the queue (/run + /status)
+ * rather than the synchronous OpenAI route: a cold start can take several
+ * minutes, longer than an HTTP response may take to start (Node gives up after
+ * 300 s). A job still unfinished at the deadline is cancelled so no worker keeps
+ * running for it.
+ */
+async function vllmChat(body: unknown): Promise<OaiCompletion> {
+  const base = `https://api.runpod.ai/v2/${llmEndpoint}`;
+  const headers = { Authorization: `Bearer ${config.apiKey}`, "Content-Type": "application/json" };
+  const call = async (path: string, init?: RequestInit) => {
+    const res = await fetch(`${base}${path}`, { ...init, headers, cache: "no-store", signal: AbortSignal.timeout(60_000) });
+    if (res.status === 401 || res.status === 403)
+      throw new Error(`Runpod vLLM ${res.status}: the app's Runpod API key has no access to endpoint ${llmEndpoint} (restricted keys must list it).`);
+    if (!res.ok) throw new Error(`Runpod vLLM ${res.status}: ${(await res.text()).slice(0, 300)}`);
+    return res.json();
+  };
+  const job = (await call("/run", { method: "POST", body: JSON.stringify({ input: { openai_route: "/v1/chat/completions", openai_input: body } }) })) as { id: string };
+  const deadline = Date.now() + VLLM_TIMEOUT_MS;
+  for (let wait = 0; ; wait = Math.min(wait + 500, 3000)) {
+    if (wait) await sleep(wait);
+    const s = (await call(`/status/${encodeURIComponent(job.id)}`)) as { status: string; output?: unknown; error?: string };
+    if (s.status === "COMPLETED") {
+      const out = Array.isArray(s.output) ? s.output[0] : s.output;
+      if (!out || typeof out !== "object" || !("choices" in out)) throw new Error(`Runpod vLLM returned no completion: ${JSON.stringify(s.output).slice(0, 200)}`);
+      return out as OaiCompletion;
+    }
+    if (s.status === "FAILED" || s.status === "CANCELLED" || s.status === "TIMED_OUT")
+      throw new Error(`Runpod vLLM job ${s.status.toLowerCase()}: ${String(s.error ?? JSON.stringify(s.output ?? "")).slice(0, 300)}`);
+    if (Date.now() > deadline) {
+      await call(`/cancel/${encodeURIComponent(job.id)}`, { method: "POST" }).catch(() => {});
+      throw new Error(`Runpod vLLM: no worker answered within ${VLLM_TIMEOUT_MS / 60_000} minutes (job cancelled).`);
+    }
+  }
+}
+
 class VllmSession implements LlmSession {
   private messages: OaiMessage[];
 
@@ -238,21 +282,7 @@ class VllmSession implements LlmSession {
       // Qwen3: skip the long <think> phase; tool calls are the agent's reasoning here.
       chat_template_kwargs: { enable_thinking: false },
     };
-    // A cold worker loads the model first; the route holds the request meanwhile.
-    const res = await fetch(`https://api.runpod.ai/v2/${llmEndpoint}/openai/v1/chat/completions`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${config.apiKey}`, "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-      signal: AbortSignal.timeout(10 * 60_000),
-      cache: "no-store",
-    });
-    if (res.status === 401 || res.status === 403)
-      throw new Error(`Runpod vLLM ${res.status}: the app's Runpod API key has no access to endpoint ${llmEndpoint} (restricted keys must list it).`);
-    if (!res.ok) throw new Error(`Runpod vLLM ${res.status}: ${(await res.text()).slice(0, 300)}`);
-    const data = (await res.json()) as {
-      choices: { message: OaiMessage; finish_reason: string }[];
-      usage?: { prompt_tokens: number; completion_tokens: number };
-    };
+    const data = await vllmChat(body);
     const msg = data.choices[0]?.message ?? { role: "assistant", content: "" };
     this.messages.push({ role: "assistant", content: msg.content ?? "", ...(msg.tool_calls?.length ? { tool_calls: msg.tool_calls } : {}) });
 
