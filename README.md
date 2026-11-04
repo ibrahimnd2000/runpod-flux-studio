@@ -31,11 +31,12 @@ curl -s -X POST https://api.runpod.ai/v2/y6hj5mx4y5b2su/runsync \
 app on a Runpod CPU pod (single and parallel bulk generation, live endpoint dashboards, a media library on a
 network volume, beginner tooltips); image → video endpoints with Wan 2.2 and LTX-2.5 using Runpod model caching
 (see [Video](#video-image--clip-with-wan-22-and-ltx-25)); pipelines, agents and a battleground on top of all of it
-(see [Orchestration](#orchestration-pipelines-agents-battleground)); 140 automated tests in CI.
+(see [Orchestration](#orchestration-pipelines-agents-battleground)); LoRA fine-tuning of FLUX.1-dev on a Serverless
+endpoint (see [Fine-tuning](#fine-tuning-flux-loras)); 168 automated tests in CI.
 
 ## Contents
 [Results](#results) · [Quick start](#quick-start) · [API](#api) · [Video](#video-image--clip-with-wan-22-and-ltx-25) ·
-[Orchestration](#orchestration-pipelines-agents-battleground) ·
+[Orchestration](#orchestration-pipelines-agents-battleground) · [Fine-tuning](#fine-tuning-flux-loras) ·
 [Architecture](#architecture) · [Design decisions](#design-decisions) · [Platform notes](#platform-notes) ·
 [Cost and business case](#cost-and-business-case) · [Limitations and next steps](#limitations-and-next-steps) ·
 [Repository](#repository)
@@ -105,8 +106,8 @@ set `RUNPOD_API_KEY` and `ENDPOINT_ID`; *Run sync* renders the image in the resp
 ### 3. Run the worker locally (no GPU, no credits)
 ```bash
 python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
-.venv/bin/ruff check . && .venv/bin/pytest -q              # what CI runs (31 worker/bench tests)
-(cd app && npm ci && npm test)                              # 109 app tests: fake Runpod + Anthropic, no keys
+.venv/bin/ruff check . && .venv/bin/pytest -q              # what CI runs (49 worker/bench tests)
+(cd app && npm ci && npm test)                              # 119 app tests: fake Runpod + Anthropic, no keys
 
 cd workers/image
 MOCK_PIPELINE=1 ../../.venv/bin/python handler.py          # one job from test_input.json (SDK local mode)
@@ -254,6 +255,51 @@ flow works without any key, and a **dry run** replaces GPU jobs with placeholder
 Claude-driven runs and judged battles need the deployment's access code and are run from the hosted app; their
 numbers aren't claimed here yet. Costs are labelled honestly in the UI: Claude tokens are metered at list price,
 vLLM time is an estimate (GPU-seconds × the pool's price).
+
+## Fine-tuning: FLUX LoRAs
+
+The **Fine-tune** page (`/lora`) teaches FLUX.1-dev a style, product or character from the library: pick 4–40
+images, name a trigger word, and a LoRA trains on a Runpod Serverless GPU. Then "Use in Studio" puts it in the
+prompt box with a strength slider.
+
+- **Same worker image, separate endpoint.** `workers/image` handles `task: "train_lora"`
+  ([`lora_train.py`](workers/image/lora_train.py)) next to generation. Training runs on its own endpoint
+  (`eu4cak6ivq2uep`, [`scripts/deploy_train.sh`](scripts/deploy_train.sh): max 1 worker, 1 h job timeout, 15 s idle)
+  so a 10-minute training never holds a worker the Studio is waiting for.
+- **Data path without a bucket.** The job gets URLs to the library images on the app; each caption is the trigger
+  word plus the image's original prompt. The worker `PUT`s the finished adapter (safetensors) back to the app with a
+  one-time token (only its SHA-256 is stored). An image job that names a LoRA gets its URL; the worker downloads and
+  caches it and keeps one adapter loaded at a time.
+- **Training recipe.** Rank 16 on the attention projections (`to_q/k/v/out`), flow-matching loss with FLUX's
+  resolution-shifted logit-normal timesteps, guidance 1.0, bf16 with gradient checkpointing, 512 px, AdamW 1e-4;
+  text and image latents are encoded once and the encoders moved off the GPU. Presets: 400 / 800 / 1500 steps.
+- **Guardrails.** One training at a time, 3 per day, the access code; the progress bar shows Runpod's own status
+  (waiting for a GPU → starting → step / loss), so a queued job never reads as running.
+
+**Measured** (4 Nov 2026, one run, 6 Europa images from the library, Standard = 800 steps, rank 16, 512 px):
+
+| Training | Value |
+|---|---|
+| GPU | RTX 6000 Ada (48 GB) |
+| Queue (`delayTime`, first worker pulling the 30 GB image) | 299 s |
+| Training, 800 steps | **641 s** (0.80 s/step); image download 8.8 s, encoding 6.9 s, upload 3.3 s |
+| GPU time (`executionTime`) · **cost** | 665 s · **$0.32** |
+| Adapter | 37.4 MB safetensors · final loss 0.341 |
+| Generating with it (1024², 28 steps) | 19.8 s inference vs 15.9 s without on the same GPU (+25%, one pair; the adapter isn't fused) |
+
+<table><tr>
+<td><img src="docs/examples/lora-off.jpg" width="300" alt="Lighthouse at night without the LoRA"></td>
+<td><img src="docs/examples/lora-europa.jpg" width="300" alt="Same prompt and seed with the Europa LoRA"></td>
+</tr></table>
+
+*"zxq_europa, a lighthouse on a rocky coast at night", seed 4242: without the LoRA (left) and with the Europa LoRA
+at strength 1.0 (right). The LoRA moves it to the training set's cold, glowing blue look; with 6 images and a
+subject that isn't in the set, the shift is clear but moderate.*
+
+**Two platform notes from shipping it.** The account's worker quota (5 max workers summed over all endpoints) was
+full, so the image endpoint went from max 2 to max 1 to make room. And with a single max worker, the training
+endpoint's only worker was *throttled* (no free GPU on its host) for ~39 min before two test images ran; nothing
+bills while queued, but a production setup would allow more GPU pools or a second worker.
 
 ## Architecture
 
@@ -418,6 +464,9 @@ growth: 10,000 images a month is about **61 GPU-hours** at the measured 21.9 s p
 ## Limitations and next steps
 - **Video benchmark:** one clip per model so far; next, a small benchmark (540p/720p, 2 s/5 s, warm vs cold) for
   time and $/clip.
+- **Fine-tuning:** a held-out evaluation (CLIP/style similarity to the training set vs the base model) across
+  steps and ranks, fusing the adapter to remove the +25% inference cost, and captions written by a vision LLM
+  instead of the original prompts.
 - **Agents:** a fixed set of battle briefs run several times per contestant, so the leaderboard means something
   statistically; Qwen3 with thinking on versus off; and an active LLM worker during demos to remove its cold start.
 - **Cold-start study:** the FLUX handler with Runpod model caching instead of baked weights; compare first-request
@@ -434,15 +483,15 @@ growth: 10,000 images a month is about **61 GPU-hours** at the measured 21.9 s p
 
 ## Repository
 ```
-workers/image/     FLUX.1-dev Serverless worker: handler.py, Dockerfile (deps → check → weights → final)
+workers/image/     FLUX.1-dev Serverless worker: handler.py, lora_train.py (LoRA training), Dockerfile (deps → check → weights → final)
 workers/video/     Wan 2.2 / LTX-2.5 image-to-video worker: handler.py, Dockerfile (weights via model caching)
 tests/             image + video handler tests with mocked pipelines, benchmark report tests (run in CI)
 app/tests/         Vitest: limits, library, pipelines, tools + budgets, agent loop, Claude/vLLM adapters,
                    battles + Elo, every API route against a fake Runpod API (run in CI)
 bench/             bench.py (Runpod delayTime/executionTime, cost), prices.yaml, raw results
-app/               Next.js 16 app: Studio, bulk, library, Animate, dashboards, Pipelines, Agent, Battleground
+app/               Next.js 16 app: Studio, bulk, library, Animate, dashboards, Pipelines, Agent, Battleground, Fine-tune
 scripts/           build_and_push.sh, deploy.sh (image endpoint), deploy_video.sh, deploy_video_wan.sh,
-                   deploy_llm.sh (vLLM agent endpoint), deploy_app.sh (app pod),
+                   deploy_llm.sh (vLLM agent endpoint), deploy_train.sh (LoRA training endpoint), deploy_app.sh (app pod),
                    generate.sh, curl examples
 postman/           Postman collection: image runsync/run/status/errors/health, video run/status/errors/health
 docs/              architecture, benchmarks, example requests/responses, screenshots
