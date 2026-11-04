@@ -31,7 +31,7 @@ curl -s -X POST https://api.runpod.ai/v2/y6hj5mx4y5b2su/runsync \
 app on a Runpod CPU pod (single and parallel bulk generation, live endpoint dashboards, a media library on a
 network volume, beginner tooltips); image → video endpoints with Wan 2.2 and LTX-2.5 using Runpod model caching
 (see [Video](#video-image--clip-with-wan-22-and-ltx-25)); pipelines, agents and a battleground on top of all of it
-(see [Orchestration](#orchestration-pipelines-agents-battleground)); 129 automated tests in CI.
+(see [Orchestration](#orchestration-pipelines-agents-battleground)); 140 automated tests in CI.
 
 ## Contents
 [Results](#results) · [Quick start](#quick-start) · [API](#api) · [Video](#video-image--clip-with-wan-22-and-ltx-25) ·
@@ -106,7 +106,7 @@ set `RUNPOD_API_KEY` and `ENDPOINT_ID`; *Run sync* renders the image in the resp
 ```bash
 python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
 .venv/bin/ruff check . && .venv/bin/pytest -q              # what CI runs (31 worker/bench tests)
-(cd app && npm ci && npm test)                              # 98 app tests: fake Runpod + Anthropic, no keys
+(cd app && npm ci && npm test)                              # 109 app tests: fake Runpod + Anthropic, no keys
 
 cd workers/image
 MOCK_PIPELINE=1 ../../.venv/bin/python handler.py          # one job from test_input.json (SDK local mode)
@@ -376,6 +376,19 @@ Things found while deploying, worth knowing for anyone building on Runpod (all h
 - **Restricted API keys list endpoints explicitly.** The app's key (a Runpod Secret) was scoped to the endpoints
   that existed when it was made, so a new endpoint answered `403 Forbidden` until the key's permissions were
   extended. The app now names that cause in the error.
+- **Pods read Secrets at container start.** After the key's value changed, the app kept the old one through a
+  plain restart; re-applying the pod's settings (same image and env, REST `PATCH /pods/{id}`) rebuilt the
+  container and picked it up.
+- **Long cold starts outlast synchronous HTTP.** The vLLM worker's OpenAI route holds the request through a cold
+  start. One pipeline step failed with `fetch failed` at exactly 300 s, which is Node's default wait for response headers,
+  while the worker was still loading. The app now sends LLM calls through the queue (`/run` with
+  `openai_route`, then `/status`), which survives any queue time and cancels the job if no worker answers in
+  10 minutes. A measured cold call: 170 s in the queue, 0.7 s of execution.
+- **Structured outputs reject numeric bounds.** The battle judge's verdict schema had `minimum`/`maximum` on its
+  1-10 scores; the Claude API answers that with a 400 (the SDK strips them only in `.parse()`), so the first live
+  battle got no verdict. The unit test hadn't caught it because the SDK is mocked there. The bounds now live in the
+  field description and are enforced after parsing, a test asserts the schema has no unsupported keywords, and a
+  failed battle can be judged again from the page.
 - **Throttled workers.** A worker whose host has the model cached but whose GPU is busy with other customers shows
   as `throttled`; jobs wait in the queue until it frees up or another host is used.
 - **Silent dependencies.** Wan's pipeline imports `ftfy` only when it runs; the first job failed with
