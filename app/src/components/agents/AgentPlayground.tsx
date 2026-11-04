@@ -85,6 +85,20 @@ export default function AgentPlayground() {
   const { run, error: runError } = useRun(runId);
   const recent = useRecentRuns("agent", run?.status);
 
+  // Opening a run (link, reload or Recent runs) shows its own brief, model, persona and budget
+  // next to its trace, instead of whatever the form held. Once per run, so edits stick.
+  const [shownRunId, setShownRunId] = useState<string | null>(null);
+  if (run && run.id !== shownRunId) {
+    setShownRunId(run.id);
+    setBrief(run.brief);
+    if (run.contestant) {
+      setPick({ provider: run.contestant.provider, model: run.contestant.model });
+      setPersona(run.contestant.persona);
+    }
+    setBudget(run.budget);
+    setDryRun(run.mock);
+  }
+
   const model = cfg?.models.find((m) => m.provider === pick?.provider && m.model === pick?.model) ?? cfg?.models[0];
   const b = budget ?? cfg?.defaultBudget;
 
