@@ -134,6 +134,8 @@ export interface MediaView {
   usage: { count: number; bytes: number; persistent: boolean };
   videoEnabled: boolean;
   videoModels: VideoModel[];
+  /** Video jobs still in flight, then ones that failed in the last few hours; newest first. */
+  videoJobs: VideoJobView[];
 }
 
 // --------------------------------------------------------------------------- //

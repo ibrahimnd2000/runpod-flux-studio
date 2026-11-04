@@ -2,10 +2,11 @@
 
 import { Check, Clapperboard, Download, Images, Play, Search, Trash2, X } from "lucide-react";
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
-import type { MediaItem, MediaView } from "@/lib/types";
+import { TERMINAL, type MediaItem, type MediaView } from "@/lib/types";
 
+import { useNow } from "./agents/shared";
 import { getJson } from "./api";
 import { ago, secs, shortGpu, usd } from "./format";
 import Notice from "./Notice";
@@ -14,6 +15,7 @@ import { useToast } from "./ui/Toaster";
 import { Term } from "./ui/Tooltip";
 import { useAccessCode } from "./useAccessCode";
 import AnimateDialog, { type AnimateSource } from "./video/AnimateDialog";
+import VideoJobTile from "./video/VideoJobTile";
 
 const mb = (bytes: number) => `${(bytes / 2 ** 20).toFixed(1)} MB`;
 
@@ -29,30 +31,49 @@ export default function Library() {
   const { code, setCode, remember } = useAccessCode();
   const toast = useToast();
   const [animate, setAnimate] = useState<AnimateSource | null>(null);
+  // Clips in flight at the last load, to announce the ones that finish meanwhile.
+  const inFlight = useRef<Set<string> | null>(null);
+  const dialogOpen = useRef(false); // the Animate dialog announces its own clip
+  useEffect(() => {
+    dialogOpen.current = !!animate;
+  }, [animate]);
 
   const load = useCallback(async () => {
     const res = await getJson<MediaView>("/api/media");
     if (res.ok) {
+      const active = new Set(res.data.videoJobs.filter((j) => !TERMINAL.includes(j.status)).map((j) => j.id));
+      for (const id of inFlight.current ?? []) {
+        if (active.has(id) || dialogOpen.current) continue;
+        const failed = res.data.videoJobs.find((j) => j.id === id);
+        if (failed) toast("error", "A video job failed; see its tile in the library");
+        else if (res.data.items.some((i) => i.id === id)) toast("success", "Clip ready · saved to the library");
+      }
+      inFlight.current = active;
       setView(res.data);
       setLoadError(null);
     } else {
       setLoadError(res.error ?? "Unknown error");
     }
-  }, []);
+  }, [toast]);
 
   const closeAnimate = useCallback(() => {
     setAnimate(null);
     load(); // pick up a clip that finished meanwhile
   }, [load]);
 
+  const jobs = view?.videoJobs ?? [];
+  const activeJobs = jobs.filter((j) => !TERMINAL.includes(j.status)).length;
+  const now = useNow(activeJobs > 0);
+
+  // Poll faster while a clip is in flight so its tile follows the job.
   useEffect(() => {
     const first = setTimeout(load, 0);
-    const t = setInterval(load, 20000);
+    const t = setInterval(load, activeJobs ? 5000 : 20000);
     return () => {
       clearTimeout(first);
       clearInterval(t);
     };
-  }, [load]);
+  }, [load, activeJobs]);
 
   // Esc closes the lightbox.
   useEffect(() => {
@@ -113,6 +134,7 @@ export default function Library() {
               <span className="font-mono">
                 {view.usage.count} images · {mb(view.usage.bytes)}
                 {view.usage.persistent ? "" : " · in memory only"}
+                {activeJobs > 0 && ` · ${activeJobs} clip${activeJobs === 1 ? "" : "s"} generating`}
               </span>
             )}
           </p>
@@ -128,7 +150,7 @@ export default function Library() {
           {problem && <Notice tone="error" title={problem.title}>{problem.detail}</Notice>}
           {loadError && (
             <Notice tone={view ? "warn" : "error"} title={view ? "Showing the last loaded library" : "Couldn't load the library"}>
-              {loadError} Retrying every 20 s.
+              {loadError} Retrying every {activeJobs ? 5 : 20} s.
             </Notice>
           )}
         </div>
@@ -179,7 +201,7 @@ export default function Library() {
         </div>
       )}
 
-      {view && items.length === 0 && (
+      {view && items.length === 0 && jobs.length === 0 && (
         <Card>
           <EmptyState icon={<Images className="h-8 w-8" />} title={view.items.length ? "No images match your search" : "No images yet"}>
             {view.items.length ? (
@@ -194,6 +216,9 @@ export default function Library() {
       )}
 
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4 2xl:grid-cols-5">
+        {jobs.map((job) => (
+          <VideoJobTile key={job.id} job={job} source={view?.items.find((i) => i.id === job.input.sourceId)} now={now} />
+        ))}
         {items.map((item) => {
           const isSelected = selected.has(item.id);
           return (

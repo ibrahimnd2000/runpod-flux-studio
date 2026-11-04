@@ -21,6 +21,8 @@ const fake = {
   /** Status polls a job needs before it completes. */
   pollsToFinish: 2,
   fail: false,
+  /** How video status polls answer once due: the real result, a failed job, or Runpod not finding it. */
+  videoEnd: "complete" as "complete" | "fail" | "gone",
   submitted: [] as { url: string; body: Record<string, unknown> }[],
   auth: new Set<string>(),
 };
@@ -38,7 +40,9 @@ function route(url: string, init?: RequestInit): Response {
     const id = m[2];
     const k = (fake.polls.get(id) ?? 0) + 1;
     fake.polls.set(id, k);
+    if (m[1] === "wan1" && fake.videoEnd === "gone") return json({ error: "job not found" }, 404);
     if (k < fake.pollsToFinish) return json({ id, status: "IN_PROGRESS", output: { step: 3, total_steps: 28 } });
+    if (m[1] === "wan1" && fake.videoEnd === "fail") return json({ id, status: "FAILED", delayTime: 900, executionTime: 1200, error: "CUDA out of memory" });
     const worker = { id: "w1", gpu: GPU, vram_total_gb: 48, peak_vram_gb: 33.8, cold_start: false, model_load_ms: 0, process_ready_s: 1, jobs_served: 2 };
     const output =
       m[1] === "img1"
@@ -62,6 +66,7 @@ const mediaList = await import("@/app/api/media/route");
 const mediaById = await import("@/app/api/media/[id]/route");
 const animate = await import("@/app/api/animate/route");
 const videos = await import("@/app/api/videos/[id]/route");
+const videoCount = await import("@/app/api/videos/route");
 const endpoint = await import("@/app/api/endpoint/route");
 const { executeTool } = await import("@/lib/agents/tools");
 const { createRun } = await import("@/lib/agents/runs");
@@ -78,6 +83,7 @@ const getJob = async (id: string) => (await (await jobs.GET(new Request("http://
 beforeEach(() => {
   fake.pollsToFinish = 2;
   fake.fail = false;
+  fake.videoEnd = "complete";
 });
 afterAll(() => {
   vi.unstubAllEnvs();
@@ -199,6 +205,55 @@ describe("video", () => {
     expect(v.output).toMatchObject({ mediaId: id, url: `/api/media/${id}` });
     const clip = await mediaById.GET(new Request("http://test"), params(id));
     expect(clip.headers.get("content-type")).toBe("video/mp4");
+  });
+
+  it("keeps clips nobody is watching visible in the library until they finish", async () => {
+    const list = async () => (await (await mediaList.GET()).json()) as MediaView;
+    const count = async () => (await (await videoCount.GET()).json()).active as number;
+    const source = (await list()).items.find((i) => (i.kind ?? "image") === "image")!;
+    fake.pollsToFinish = 3; // two "generating" answers, then the clip
+    const { id } = await (await animate.POST(req({ sourceId: source.id, prompt: "drifting clouds", num_frames: 49 }, "test-code", "198.51.100.9"))).json();
+    expect(await count()).toBe(1);
+
+    // The dialog is closed: only the library asks about the job.
+    let view = await list();
+    expect(view.videoJobs).toEqual([expect.objectContaining({ id, status: "IN_PROGRESS", progress: { step: 3, total_steps: 28 }, input: expect.objectContaining({ sourceId: source.id }) })]);
+    expect(view.items.some((i) => i.id === id)).toBe(false);
+
+    await list();
+    view = await list();
+    expect(view.videoJobs).toEqual([]);
+    expect(view.items.find((i) => i.id === id)).toMatchObject({ kind: "video", prompt: "drifting clouds" });
+    expect(await count()).toBe(0);
+  });
+
+  it("shows a failed clip's error in the library", async () => {
+    const source = ((await (await mediaList.GET()).json()) as MediaView).items.find((i) => (i.kind ?? "image") === "image")!;
+    const { id } = await (await animate.POST(req({ sourceId: source.id, prompt: "zoom out", num_frames: 49 }, "test-code", "198.51.100.10"))).json();
+    fake.videoEnd = "fail";
+    fake.pollsToFinish = 1;
+    const view = (await (await mediaList.GET()).json()) as MediaView;
+    expect(view.videoJobs.find((j) => j.id === id)).toMatchObject({ status: "FAILED", error: "CUDA out of memory", executionMs: 1200 });
+    expect(await (await videoCount.GET()).json()).toEqual({ active: 0 });
+  });
+
+  it("waits out Runpod hiccups, but gives up on a job it still can't read hours later", async () => {
+    const source = ((await (await mediaList.GET()).json()) as MediaView).items.find((i) => (i.kind ?? "image") === "image")!;
+    const { id } = await (await animate.POST(req({ sourceId: source.id, prompt: "tilt up", num_frames: 49 }, "test-code", "198.51.100.11"))).json();
+    fake.videoEnd = "gone";
+    let view = (await (await mediaList.GET()).json()) as MediaView;
+    expect(view.videoJobs.find((j) => j.id === id)).toMatchObject({ status: "IN_QUEUE" }); // last known, still tracked
+
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(Date.now() + 4 * 60 * 60_000);
+    try {
+      view = (await (await mediaList.GET()).json()) as MediaView;
+      expect(view.videoJobs.some((j) => j.id === id)).toBe(false);
+      const v = (await (await videos.GET(new Request("http://test"), params(id))).json()) as VideoJobView;
+      expect(v).toMatchObject({ status: "FAILED", error: expect.stringMatching(/Lost track/) });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("rejects unknown sources and unknown video jobs", async () => {

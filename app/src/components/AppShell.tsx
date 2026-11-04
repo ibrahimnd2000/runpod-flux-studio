@@ -3,7 +3,7 @@
 import { BookOpen, Bot, Images, Sparkles, Swords, Workflow } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import EasterEggs, { HAIKUS } from "./fun/EasterEggs";
 import { endpointStatus, useEndpoint } from "./EndpointProvider";
@@ -18,6 +18,25 @@ const NAV = [
   { href: "/battle", label: "Battleground", icon: Swords },
   { href: "/about", label: "How it works", icon: BookOpen },
 ];
+
+/** Clips in flight (the Animate dialog may be closed), for the Library badge. */
+function useActiveVideos() {
+  const [n, setN] = useState(0);
+  useEffect(() => {
+    const load = () =>
+      fetch("/api/videos")
+        .then((r) => (r.ok ? r.json() : null))
+        .then((d) => d && setN(Number(d.active) || 0))
+        .catch(() => {});
+    const first = setTimeout(load, 0);
+    const t = setInterval(load, 15000);
+    return () => {
+      clearTimeout(first);
+      clearInterval(t);
+    };
+  }, []);
+  return n;
+}
 
 const DOT = { green: "bg-emerald-500", amber: "bg-amber-500", red: "bg-red-500", blue: "bg-sky-500", neutral: "bg-zinc-400" };
 
@@ -81,6 +100,8 @@ function StatusPill() {
 export default function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const active = (href: string) => (href === "/" ? pathname === "/" : pathname.startsWith(href));
+  const videos = useActiveVideos();
+  const badge = (href: string) => (href === "/library" && videos > 0 ? videos : 0);
   return (
     <div className="flex min-h-full">
       <aside className="sticky top-0 hidden h-screen w-60 shrink-0 flex-col border-r border-border bg-card px-4 py-5 lg:flex">
@@ -97,6 +118,13 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             >
               <Icon className="h-4 w-4" aria-hidden />
               {label}
+              {badge(href) > 0 && (
+                <span className="ml-auto flex items-center gap-1 rounded-full bg-accent/15 px-1.5 py-0.5 text-[10px] font-medium text-accent" title="Clips generating">
+                  <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-accent" aria-hidden />
+                  {badge(href)}
+                  <span className="sr-only"> clips generating</span>
+                </span>
+              )}
             </Link>
           ))}
         </nav>
@@ -118,9 +146,10 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                 href={href}
                 aria-label={label}
                 aria-current={active(href) ? "page" : undefined}
-                className={`rounded-lg p-2 ${active(href) ? "bg-accent/10 text-accent" : "text-subtle"}`}
+                className={`relative rounded-lg p-2 ${active(href) ? "bg-accent/10 text-accent" : "text-subtle"}`}
               >
                 <Icon className="h-4 w-4" />
+                {badge(href) > 0 && <span className="absolute top-1 right-1 h-2 w-2 animate-pulse rounded-full bg-accent" aria-hidden />}
               </Link>
             ))}
           </nav>

@@ -280,7 +280,7 @@ export default function AnimateDialog({
                 {running && job.status === "IN_QUEUE" && elapsed > 20_000 && (
                   <Notice tone="warn" title="Starting a video GPU">
                     No warm video worker: Runpod is bringing one up and loading the model. This can take several
-                    minutes; you can keep this open or close it and find the clip in the library later.
+                    minutes; you can keep this open, or close it and follow the job in the Library.
                   </Notice>
                 )}
                 {running && job.progress && (

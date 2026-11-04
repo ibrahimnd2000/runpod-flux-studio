@@ -5,7 +5,7 @@ import { saveMedia } from "./media";
 import { requestCost } from "./prices";
 import { videoJobStatus } from "./runpod";
 import { TERMINAL, type VideoJobView, type VideoWorkerInfo } from "./types";
-import { finishVideo, getVideoPending, getVideoRecord, pendingVideoIds } from "./videoStore";
+import { finishVideo, getVideoPending, getVideoRecord, pendingVideos } from "./videoStore";
 
 interface VideoOutput {
   video?: string;
@@ -82,7 +82,30 @@ export async function refreshVideoJob(id: string): Promise<VideoJobView | null> 
   return view;
 }
 
-/** Finish any video jobs nobody is watching (dialog closed), so clips still reach the library. */
-export async function syncPendingVideos(max = 5) {
-  await Promise.allSettled(pendingVideoIds().slice(0, max).map((id) => refreshVideoJob(id)));
+// Runpod keeps an async job's result for a limited time after it ends; a job that
+// still can't be read this long after submission (app down meanwhile) is given up.
+const GIVE_UP_MS = 3 * 60 * 60_000;
+
+/**
+ * Checks the newest `max` in-flight video jobs (dialog closed or not), so finished
+ * clips reach the library, and returns every job still in flight for the
+ * Library's status tiles. Jobs past `max` are returned as last known.
+ */
+export async function syncPendingVideos(max = 5): Promise<VideoJobView[]> {
+  const pending = pendingVideos();
+  const views = await Promise.all(
+    pending.map(async (p, i): Promise<VideoJobView | null> => {
+      const last: VideoJobView = { id: p.id, status: "IN_QUEUE", submittedAt: p.submittedAt, input: p.input, sourcePrompt: p.sourcePrompt };
+      if (i >= max) return last;
+      try {
+        return await refreshVideoJob(p.id);
+      } catch (e) {
+        if (Date.now() - p.submittedAt < GIVE_UP_MS) return last;
+        console.error(`giving up on video job ${p.id}`, e);
+        finishVideo({ ...last, status: "FAILED", error: "Lost track of this job: Runpod no longer has its result." });
+        return null;
+      }
+    }),
+  );
+  return views.filter((v): v is VideoJobView => !!v && !TERMINAL.includes(v.status));
 }

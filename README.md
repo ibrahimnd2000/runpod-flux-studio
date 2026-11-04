@@ -31,7 +31,7 @@ curl -s -X POST https://api.runpod.ai/v2/y6hj5mx4y5b2su/runsync \
 app on a Runpod CPU pod (single and parallel bulk generation, live endpoint dashboards, a media library on a
 network volume, beginner tooltips); image → video endpoints with Wan 2.2 and LTX-2.5 using Runpod model caching
 (see [Video](#video-image--clip-with-wan-22-and-ltx-25)); pipelines, agents and a battleground on top of all of it
-(see [Orchestration](#orchestration-pipelines-agents-battleground)); 126 automated tests in CI.
+(see [Orchestration](#orchestration-pipelines-agents-battleground)); 129 automated tests in CI.
 
 ## Contents
 [Results](#results) · [Quick start](#quick-start) · [API](#api) · [Video](#video-image--clip-with-wan-22-and-ltx-25) ·
@@ -106,7 +106,7 @@ set `RUNPOD_API_KEY` and `ENDPOINT_ID`; *Run sync* renders the image in the resp
 ```bash
 python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
 .venv/bin/ruff check . && .venv/bin/pytest -q              # what CI runs (31 worker/bench tests)
-(cd app && npm ci && npm test)                              # 95 app tests: fake Runpod + Anthropic, no keys
+(cd app && npm ci && npm test)                              # 98 app tests: fake Runpod + Anthropic, no keys
 
 cd workers/image
 MOCK_PIPELINE=1 ../../.venv/bin/python handler.py          # one job from test_input.json (SDK local mode)
