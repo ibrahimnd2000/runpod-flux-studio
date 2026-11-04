@@ -117,6 +117,8 @@ export interface MediaItem {
   /** For videos: the library image it was animated from, and its length. */
   sourceId?: string;
   durationS?: number;
+  /** For videos: the model that made it (missing on clips saved before this was recorded). */
+  model?: VideoModel;
   createdAt: number;
   prompt: string;
   width: number;

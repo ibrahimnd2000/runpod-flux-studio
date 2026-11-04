@@ -64,6 +64,7 @@ export async function refreshVideoJob(id: string): Promise<VideoJobView | null> 
         executionMs: s.executionTime,
         costUsd: view.costUsd,
         durationS: Number(out.params?.duration_s ?? 0) || undefined,
+        model: pending.input.model ?? "ltx2",
       },
       out.video,
     );

@@ -197,9 +197,10 @@ const TOOLS: { [N in ToolName]: Impl<N> } = {
     return { reply, summary: "looked at the image", mediaIds: [media_id] };
   },
 
-  async search_library(call, run, _gpu, { query, limit }) {
+  async search_library(call, run, gpu, { query, limit }) {
     const words = query.toLowerCase().split(/\W+/).filter((w) => w.length > 2);
-    const scored = listMedia()
+    // A dry run may reuse its own placeholders; a real run must never animate one.
+    const scored = listMedia({ includeDryRun: gpu.dryRun })
       .filter((m) => (m.kind ?? "image") === "image")
       .map((m) => ({ m, score: words.filter((w) => m.prompt.toLowerCase().includes(w)).length }))
       .filter((x) => !words.length || x.score > 0)

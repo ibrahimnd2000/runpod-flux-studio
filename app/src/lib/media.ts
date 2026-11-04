@@ -91,8 +91,11 @@ export function getMediaItem(id: string): MediaItem | undefined {
   return isValidId(id) ? media.items.get(id) : undefined;
 }
 
-export function listMedia(): MediaItem[] {
-  return [...media.items.values()].sort((a, b) => b.createdAt - a.createdAt);
+/** Placeholders a dry run saved (lib/agents/gpu.ts); the run views show them, the library doesn't. */
+export const isDryRunMedia = (id: string) => id.startsWith("dry-");
+
+export function listMedia({ includeDryRun = false } = {}): MediaItem[] {
+  return [...media.items.values()].filter((i) => includeDryRun || !isDryRunMedia(i.id)).sort((a, b) => b.createdAt - a.createdAt);
 }
 
 export function readMedia(id: string): { bytes: Buffer; mime: string; kind: "image" | "video" } | null {
@@ -119,6 +122,6 @@ export function deleteImage(id: string): boolean {
 }
 
 export function mediaUsage() {
-  const items = [...media.items.values()];
+  const items = listMedia();
   return { count: items.length, bytes: items.reduce((a, i) => a + (i.bytes ?? 0), 0), persistent: !!dir };
 }

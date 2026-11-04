@@ -83,6 +83,8 @@ export default function Library() {
     return () => window.removeEventListener("keydown", onKey);
   }, [open]);
 
+  const clipCount = (view?.items ?? []).filter((i) => i.kind === "video").length;
+  const imageCount = (view?.items.length ?? 0) - clipCount;
   const q = query.trim().toLowerCase();
   const items = (view?.items ?? []).filter((i) => i.prompt.toLowerCase().includes(q));
   const toggle = (id: string) =>
@@ -129,10 +131,11 @@ export default function Library() {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Library</h1>
           <p className="mt-1 text-sm text-subtle">
-            Every generated image, stored on the app&apos;s Runpod network volume.{" "}
+            Every generated image and clip, stored on the app&apos;s Runpod network volume.{" "}
             {view && (
               <span className="font-mono">
-                {view.usage.count} images · {mb(view.usage.bytes)}
+                {imageCount} image{imageCount === 1 ? "" : "s"}
+                {clipCount > 0 && ` · ${clipCount} clip${clipCount === 1 ? "" : "s"}`} · {mb(view.usage.bytes)}
                 {view.usage.persistent ? "" : " · in memory only"}
                 {activeJobs > 0 && ` · ${activeJobs} clip${activeJobs === 1 ? "" : "s"} generating`}
               </span>
@@ -273,7 +276,7 @@ export default function Library() {
       {open && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm" onClick={() => setOpen(null)} role="dialog" aria-modal="true" aria-label="Image details">
           <div className="max-h-full w-full max-w-5xl overflow-auto rounded-2xl border border-border bg-card p-5 shadow-2xl" onClick={(e) => e.stopPropagation()}>
-            <div className="grid gap-5 md:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
+            <div className="grid grid-cols-1 gap-5 md:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
               {open.kind === "video" ? (
                 <video src={`/api/media/${open.id}`} controls autoPlay loop playsInline className="w-full rounded-xl" />
               ) : (
@@ -289,7 +292,7 @@ export default function Library() {
                   <dt className="text-subtle">Size</dt>
                   <dd className="text-right font-mono">
                     {open.width}×{open.height}
-                    {open.kind === "video" ? ` · ${open.durationS ?? "?"} s · LTX-2.5` : ` · ${open.steps} steps`}
+                    {open.kind === "video" ? ` · ${open.durationS ?? "?"} s · ${open.model === "wan22" ? "Wan 2.2" : "LTX-2.5"}` : ` · ${open.steps} steps`}
                   </dd>
                   <dt className="text-subtle"><Term term="seed" side="right">Seed</Term></dt>
                   <dd className="text-right font-mono">{open.seed ?? "–"}</dd>
