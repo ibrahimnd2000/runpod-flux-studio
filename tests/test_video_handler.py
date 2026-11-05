@@ -6,6 +6,7 @@ import io
 import os
 from pathlib import Path
 
+import pytest
 from PIL import Image
 
 os.environ["MOCK_PIPELINE"] = "1"
@@ -159,6 +160,11 @@ def test_image_download_failure_and_oversize(monkeypatch):
     assert "larger than" in run()["error"]
 
 
+def test_data_uri_without_data_is_an_input_error():
+    out = handler.handler({"input": {"image": "data:image/png", "prompt": "pan left"}})
+    assert "has no data" in out["error"]
+
+
 def test_undecodable_image_is_an_input_error():
     junk = base64.b64encode(b"definitely not an image").decode()
     assert "decoded" in run(image=junk)["error"]
@@ -191,3 +197,9 @@ def test_result_reports_worker_and_timings():
     assert set(out["timings"]) >= {"inference_ms", "encode_ms", "total_ms"}
     assert out["worker"]["gpu"] == "mock"
     assert base64.b64decode(out["video"])[4:8] == b"ftyp"
+
+
+def test_no_cached_model_while_offline_is_a_clear_startup_error(tmp_path, monkeypatch):
+    monkeypatch.setenv("HF_HUB_OFFLINE", "1")
+    with pytest.raises(SystemExit, match="Cached model"):
+        handler.resolve_model_path("Org/Model", str(tmp_path / "store"), str(tmp_path / "cache"))

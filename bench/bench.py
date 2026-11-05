@@ -23,8 +23,8 @@ import json
 import os
 import statistics
 import sys
+import threading
 import time
-import urllib.error
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
@@ -41,6 +41,8 @@ PROMPTS = [
     "A leather backpack hanging on a wooden peg against a sage green wall, catalogue photo",
 ]
 TERMINAL = {"COMPLETED", "FAILED", "CANCELLED", "TIMED_OUT"}
+# OSError covers URLError, HTTPError and socket timeouts; a bad body is a JSONDecodeError.
+NETWORK_ERRORS = (OSError, json.JSONDecodeError)
 
 
 def call(method, url, key, body=None):
@@ -59,6 +61,10 @@ def endpoint_url(args, endpoint):
     return f"{base}/{endpoint}" if endpoint else base
 
 
+def is_runpod(args) -> bool:
+    return args.api_base.rstrip("/") == API
+
+
 def run_one(i, args, key, endpoint):
     job_input = {
         "prompt": PROMPTS[i % len(PROMPTS)],
@@ -68,28 +74,33 @@ def run_one(i, args, key, endpoint):
         "seed": 1000 + i,
         "image_format": args.image_format,
     }
-    t0 = time.time()
+    started_at = time.time()
+    t0 = time.monotonic()
     url = endpoint_url(args, endpoint)
-    job = call("POST", f"{url}/run", key, {"input": job_input})
-    # The SDK's local API server only accepts POST on /status; Runpod accepts GET.
-    status_method = "GET" if args.api_base == API else "POST"
-    status = job
-    while status.get("status") not in TERMINAL:
-        if time.time() - t0 > args.timeout:
+    try:
+        job = call("POST", f"{url}/run", key, {"input": job_input})
+    except NETWORK_ERRORS as e:  # nothing was queued; record it and move on
+        job, status = {"id": None}, {"status": "CLIENT_ERROR", "error": f"submit failed: {e}"}
+    else:
+        # The SDK's local API server only accepts POST on /status; Runpod accepts GET.
+        status_method = "GET" if is_runpod(args) else "POST"
+        status = job
+    while status.get("status") not in TERMINAL | {"CLIENT_ERROR"}:
+        if time.monotonic() - t0 > args.timeout:
             status = {**status, "status": "CLIENT_TIMEOUT"}
             break
         time.sleep(args.poll)
         try:
             status = call(status_method, f"{url}/status/{job['id']}", key)
-        except urllib.error.URLError as e:  # transient network error: keep polling
+        except NETWORK_ERRORS as e:  # transient: keep polling
             print(f"  job {i}: poll error {e}", file=sys.stderr)
-    wall = time.time() - t0
+    wall = time.monotonic() - t0
     out = status.get("output") if isinstance(status.get("output"), dict) else {}
     row = {
         "label": args.label,
         "i": i,
         "job_id": job["id"],
-        "submitted_at": datetime.fromtimestamp(t0, UTC).isoformat(),
+        "submitted_at": datetime.fromtimestamp(started_at, UTC).isoformat(),
         "status": status.get("status"),
         "error": status.get("error") or out.get("error"),
         "input": job_input,
@@ -111,7 +122,7 @@ def run_one(i, args, key, endpoint):
 
 def cmd_run(args):
     key = os.environ.get("RUNPOD_API_KEY")
-    local = args.api_base != API
+    local = not is_runpod(args)
     endpoint = args.endpoint or ("" if local else os.environ.get("RUNPOD_IMAGE_ENDPOINT_ID"))
     if not key or (endpoint is None and not local):
         sys.exit("set RUNPOD_API_KEY and RUNPOD_IMAGE_ENDPOINT_ID (or pass --endpoint)")
@@ -122,11 +133,18 @@ def cmd_run(args):
     path = out_dir / f"{stamp}-{args.label}.jsonl"
     print(f"{args.label}: {args.n} jobs, concurrency {args.concurrency} -> {path}", file=sys.stderr)
 
-    with ThreadPoolExecutor(max_workers=args.concurrency) as pool:
-        rows = list(pool.map(lambda i: run_one(i, args, key, endpoint), range(args.n)))
+    # Each row is written as soon as its job ends, so an interrupted run keeps what it paid for.
+    lock = threading.Lock()
     with path.open("w") as f:
-        for row in rows:
-            f.write(json.dumps(row) + "\n")
+
+        def run_and_write(i):
+            row = run_one(i, args, key, endpoint)
+            with lock:
+                f.write(json.dumps(row) + "\n")
+                f.flush()
+
+        with ThreadPoolExecutor(max_workers=args.concurrency) as pool:
+            list(pool.map(run_and_write, range(args.n)))
     print(report([path]))
 
 

@@ -30,7 +30,7 @@ import os
 import random
 import tempfile
 import time
-import traceback
+import urllib.error
 import urllib.request
 import uuid
 
@@ -64,6 +64,9 @@ MAX_PROMPT_CHARS = 1000
 MAX_IMAGE_BYTES = 8 * 2**20  # /run accepts 10 MB in total
 MAX_SEED = 2**32 - 1
 MIN_FRAMES, MAX_FRAMES = 9, 241  # 241 frames = 10 s at 24 fps
+MIN_FPS, MAX_FPS = 12, 30
+LTX_STEPS = 8  # the distilled LTX-2.5 schedule (DISTILLED_SIGMA_VALUES) is fixed
+ERROR_DETAIL_CHARS = 200  # of an unexpected exception's text, returned to the caller
 # Landscape sizes; portrait inputs get width and height swapped (LTX), or the same
 # pixel area at the input's aspect ratio (Wan). Divisible by 32.
 RESOLUTIONS = {"540p": (960, 544), "720p": (1280, 704)}
@@ -99,7 +102,8 @@ def _newest_snapshot(parent: str) -> str | None:
 
 
 def resolve_model_path(model_id: str, store_dir: str, cache_dir: str, explicit: str = "") -> str:
-    """Local snapshot from Runpod's model cache if present, else the repo id (downloads, needs HF_TOKEN)."""
+    """Local snapshot from Runpod's model cache if present, else the repo id: a download, which
+    needs HF_TOKEN for gated models and fails fast when HF_HUB_OFFLINE=1 (as in our image)."""
     if explicit:
         return explicit
     store = os.path.join(store_dir, *model_id.split("/"))  # /runpod/model-store/huggingface/<org>/<name>/<rev>
@@ -111,6 +115,11 @@ def resolve_model_path(model_id: str, store_dir: str, cache_dir: str, explicit: 
     for parent in (store, hf_cache):
         if os.path.isdir(parent):
             log.warning("%s exists but has no snapshot with model_index.json: %s", parent, os.listdir(parent)[:10])
+    if os.environ.get("HF_HUB_OFFLINE") == "1":
+        raise SystemExit(
+            f"No cached model at {store} or {hf_cache}, and HF_HUB_OFFLINE=1 rules out a download: "
+            f"set the endpoint's Cached model to {model_id} (or MODEL_PATH)."
+        )
     log.warning("No cached snapshot in %s or %s; falling back to %s", store, hf_cache, model_id)
     return model_id
 
@@ -152,6 +161,9 @@ class _TorchBackend:
 
     def peak_vram_gb(self) -> float:
         return round(self.torch.cuda.max_memory_allocated() / 2**30, 1)
+
+    def recover_from_oom(self):
+        self.torch.cuda.empty_cache()
 
 
 class LTXBackend(_TorchBackend):
@@ -262,6 +274,9 @@ class MockBackend:
     def peak_vram_gb(self) -> float:
         return 0.0
 
+    def recover_from_oom(self):
+        pass
+
 
 def load_backend():
     if MOCK_PIPELINE:
@@ -291,12 +306,17 @@ def load_image(ref: str):
     if ref.startswith(("http://", "https://")):
         if not ref.startswith("https://"):
             raise InputError("image URL must use https")
+        req = urllib.request.Request(ref, headers={"User-Agent": "video-worker"})
         try:
-            with urllib.request.urlopen(ref, timeout=20) as resp:
+            with urllib.request.urlopen(req, timeout=20) as resp:
                 data = resp.read(MAX_IMAGE_BYTES + 1)
+        except urllib.error.HTTPError as e:
+            raise InputError(f"could not download image: HTTP {e.code}") from None
         except Exception as e:
-            raise InputError(f"could not download image: {e}") from e
+            raise InputError(f"could not download image: {type(e).__name__}") from None
     else:
+        if ref.startswith("data:") and "," not in ref:
+            raise InputError("image data URI has no data (expected data:<mime>;base64,<data>)")
         b64 = ref.split(",", 1)[1] if ref.startswith("data:") else ref
         try:
             data = base64.b64decode(b64, validate=True)
@@ -313,7 +333,7 @@ def load_image(ref: str):
 
 
 def snap_frames(n: int) -> int:
-    """LTX needs 8k+1 frames."""
+    """8k+1 frames: LTX needs it, and it also satisfies Wan's 4k+1."""
     n = min(max(n, MIN_FRAMES), MAX_FRAMES)
     return ((n - 1 + 4) // 8) * 8 + 1
 
@@ -342,10 +362,10 @@ def normalize_input(raw) -> tuple[dict, list, object]:
     frames = snap_frames(p["num_frames"])
     if frames != p["num_frames"]:
         notes.append(
-            f"num_frames adjusted from {p['num_frames']} to {frames} (LTX needs 8k+1, {MIN_FRAMES}–{MAX_FRAMES})"
+            f"num_frames adjusted from {p['num_frames']} to {frames} (the models need 8k+1, {MIN_FRAMES}–{MAX_FRAMES})"
         )
     p["num_frames"] = frames
-    fps = min(max(p["fps"], 12), 30)
+    fps = min(max(p["fps"], MIN_FPS), MAX_FPS)
     if fps != p["fps"]:
         notes.append(f"fps clamped from {p['fps']} to {fps}")
     p["fps"] = fps
@@ -364,8 +384,8 @@ def normalize_input(raw) -> tuple[dict, list, object]:
             notes.append(f"steps clamped from {steps} to {p['steps']}")
     else:
         if p["steps"] is not None:
-            notes.append("steps ignored: the distilled LTX-2.5 schedule is fixed at 8")
-        p["steps"] = 8
+            notes.append(f"steps ignored: the distilled LTX-2.5 schedule is fixed at {LTX_STEPS}")
+        p["steps"] = LTX_STEPS
 
     image = load_image(p.pop("image"))
     w, h = clip_size(image, p["resolution"])
@@ -379,7 +399,8 @@ def normalize_input(raw) -> tuple[dict, list, object]:
 # --------------------------------------------------------------------------- #
 BACKEND = load_backend()
 READY_S = time.perf_counter() - PROCESS_START
-_jobs_served = 0
+_jobs_started = 0  # every job, so a failed first job still counts as the cold one
+_jobs_served = 0  # successful ones
 
 
 def make_progress_reporter(job):
@@ -396,8 +417,23 @@ def make_progress_reporter(job):
     return report
 
 
+def worker_info(cold_start: bool) -> dict:
+    return {
+        "id": WORKER_ID,
+        **BACKEND.device,
+        "peak_vram_gb": BACKEND.peak_vram_gb(),
+        # First job on this worker process: it paid the model load below.
+        "cold_start": cold_start,
+        "model_load_ms": round(BACKEND.load_ms, 1),
+        "process_ready_s": round(READY_S, 2),
+        "jobs_served": _jobs_served,
+    }
+
+
 def handler(job):
-    global _jobs_served
+    global _jobs_started, _jobs_served
+    cold_start = _jobs_started == 0
+    _jobs_started += 1
     t_start = time.perf_counter()
     job_id = job.get("id") or str(uuid.uuid4())
     try:
@@ -413,10 +449,11 @@ def handler(job):
         mp4 = BACKEND.encode(frames, audio, p["fps"])
         encode_ms = (time.perf_counter() - t_enc) * 1000
     except Exception as e:  # never let one bad job kill the worker loop
-        log.error("job %s failed: %s\n%s", job_id, e, traceback.format_exc())
+        log.exception("job %s failed", job_id)
         if "out of memory" in str(e).lower():
+            BACKEND.recover_from_oom()
             return {"error": "GPU out of memory; try 540p or fewer frames"}
-        return {"error": f"generation failed: {type(e).__name__}: {e}"}
+        return {"error": f"generation failed: {type(e).__name__}: {str(e)[:ERROR_DETAIL_CHARS]}"}
 
     b64 = base64.b64encode(mp4).decode("ascii")
     if len(b64) > MAX_RESULT_MB * 2**20:
@@ -425,7 +462,6 @@ def handler(job):
             "use 540p or fewer frames"
         }
 
-    cold_start = _jobs_served == 0
     _jobs_served += 1
     response = {
         "video": b64,
@@ -437,15 +473,7 @@ def handler(job):
             "encode_ms": round(encode_ms, 1),
             "total_ms": round((time.perf_counter() - t_start) * 1000, 1),
         },
-        "worker": {
-            "id": WORKER_ID,
-            **BACKEND.device,
-            "peak_vram_gb": BACKEND.peak_vram_gb(),
-            "cold_start": cold_start,
-            "model_load_ms": round(BACKEND.load_ms, 1),
-            "process_ready_s": round(READY_S, 2),
-            "jobs_served": _jobs_served,
-        },
+        "worker": worker_info(cold_start),
         "params": {k: v for k, v in p.items() if k != "prompt"}
         | {"model": MODEL_ID, "family": FAMILY, "offload": OFFLOAD},
     }

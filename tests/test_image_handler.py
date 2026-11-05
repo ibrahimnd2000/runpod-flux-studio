@@ -82,11 +82,18 @@ def test_generation_failure_returns_error(monkeypatch):
     assert "out of memory" in run(prompt="x")["error"]
 
 
-def test_cold_start_flag_only_on_first_job():
-    before = run(prompt="x", width=256, height=256)["worker"]["jobs_served"]
-    out = run(prompt="x", width=256, height=256)["worker"]
-    assert out["jobs_served"] == before + 1
-    assert out["cold_start"] is False
+def test_cold_start_flag_only_on_first_job(monkeypatch):
+    monkeypatch.setattr(handler, "_jobs_started", 0)
+    first = run(prompt="x", width=256, height=256)["worker"]
+    second = run(prompt="x", width=256, height=256)["worker"]
+    assert first["cold_start"] is True and second["cold_start"] is False
+    assert second["jobs_served"] == first["jobs_served"] + 1
+
+
+def test_a_failed_first_job_is_the_cold_one(monkeypatch):
+    monkeypatch.setattr(handler, "_jobs_started", 0)
+    assert "error" in run(prompt="")
+    assert run(prompt="x", width=256, height=256)["worker"]["cold_start"] is False
 
 
 def test_progress_updates_are_throttled_and_end_on_last_step(monkeypatch):

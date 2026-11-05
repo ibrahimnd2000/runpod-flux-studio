@@ -11,9 +11,14 @@ Environment:
   MODEL_PRECISION "bf16" (default) or "fp8" (torchao float8 weights on the transformer)
   MOCK_PIPELINE   "1" to skip torch/diffusers and return synthetic images (local/CPU tests)
   BUCKET_*        S3-compatible storage for output="url" (see rp_upload)
+  LORA_DIR        where downloaded LoRA files are cached (default /tmp/loras; one at a time)
 
 Jobs with "task": "train_lora" fine-tune a LoRA instead (lora_train.py); a
 generate job may name a LoRA ({"lora": {"id", "url", "scale"}}) to apply.
+LoRA files are cached by id, so callers must treat an id as immutable.
+
+Jobs run one at a time per worker (the default runpod handler), so the module-level
+BACKEND and counters are not guarded; add locking before using concurrency_modifier.
 """
 
 import base64
@@ -24,10 +29,8 @@ import random
 import re
 import sys
 import time
-import traceback
 import urllib.request
 import uuid
-from urllib.parse import urlparse
 
 PROCESS_START = time.perf_counter()
 
@@ -54,6 +57,9 @@ MIN_SIDE, MAX_SIDE, SIDE_MULTIPLE = 256, 1536, 16
 MIN_STEPS, MAX_STEPS = 1, 50
 MAX_IMAGES = 4
 MAX_SEED = 2**32 - 1
+MIN_GUIDANCE, MAX_GUIDANCE = 0.0, 20.0
+MAX_LORA_SCALE = 2.0
+ERROR_DETAIL_CHARS = 200  # of an unexpected exception's text, returned to the caller
 LORA_DIR = os.environ.get("LORA_DIR", "/tmp/loras")
 MAX_LORA_BYTES = 512 * 2**20
 LORA_ID = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
@@ -117,7 +123,16 @@ class FluxBackend:
             self.pipe.unload_lora_weights()
             self.lora_id = None
         if lora and self.lora_id != wanted:
-            self.pipe.load_lora_weights(fetch_lora(lora), adapter_name="active")
+            path = fetch_lora(lora)
+            try:
+                self.pipe.load_lora_weights(path, adapter_name="active")
+            except Exception as e:
+                # A bad file must not stick: drop it from the cache and any half-loaded
+                # adapter from the pipe, so the next job (or a re-upload) starts clean.
+                log.warning("LoRA %s failed to load: %s", lora["id"], e)
+                os.remove(path)
+                self.pipe.unload_lora_weights()
+                raise InputError("the LoRA file could not be loaded (not a FLUX LoRA, or corrupted)") from None
             self.lora_id = wanted
         if lora:
             self.pipe.set_adapters(["active"], adapter_weights=[lora["scale"]])
@@ -160,11 +175,14 @@ class MockBackend:
         self.device = {"gpu": "mock", "vram_total_gb": 0.0}
         log.info("MOCK_PIPELINE=1: using synthetic images, no model loaded")
 
+    def use_lora(self, lora: dict | None):
+        if lora:
+            fetch_lora(lora)
+
     def generate(self, p: dict, on_step=None) -> list:
         from PIL import Image
 
-        if p.get("lora"):
-            fetch_lora(p["lora"])
+        self.use_lora(p.get("lora"))
         if on_step:
             for step in range(1, p["num_inference_steps"] + 1):
                 on_step(step, p["num_inference_steps"])
@@ -194,11 +212,14 @@ def load_backend():
 
 
 def fetch_lora(lora: dict) -> str:
-    """Local path of a LoRA file, downloaded once per worker (ids are immutable)."""
+    """Local path of a LoRA file, downloaded once per worker (ids are immutable).
+    Only the newest file is kept: one adapter is loaded at a time, and container disk is small."""
     path = os.path.join(LORA_DIR, f"{lora['id']}.safetensors")
     if os.path.exists(path):
         return path
     os.makedirs(LORA_DIR, exist_ok=True)
+    for old in os.listdir(LORA_DIR):
+        os.remove(os.path.join(LORA_DIR, old))
     req = urllib.request.Request(lora["url"], headers={"User-Agent": "flux-worker"})
     try:
         with urllib.request.urlopen(req, timeout=120) as res:
@@ -270,7 +291,7 @@ def normalize_input(raw) -> tuple[dict, list]:
     if p["lora"] is not None:
         lora = p["lora"]
         url = lora.get("url")
-        if not isinstance(url, str) or urlparse(url).scheme != "https":
+        if not lora_train.is_https_url(url):
             raise InputError("lora.url must be an https URL")
         if not isinstance(lora.get("id"), str) or not LORA_ID.match(lora["id"]):
             raise InputError("lora.id must be 1-64 letters, digits, '-' or '_'")
@@ -278,8 +299,8 @@ def normalize_input(raw) -> tuple[dict, list]:
             scale = float(lora.get("scale", 1.0))
         except (TypeError, ValueError):
             raise InputError("lora.scale must be a number") from None
-        if not 0.0 <= scale <= 2.0:
-            raise InputError("lora.scale must be between 0 and 2")
+        if not 0.0 <= scale <= MAX_LORA_SCALE:
+            raise InputError(f"lora.scale must be between 0 and {MAX_LORA_SCALE:g}")
         p["lora"] = {"id": lora["id"], "url": url, "scale": scale}
 
     notes = []
@@ -287,7 +308,7 @@ def normalize_input(raw) -> tuple[dict, list]:
     p["height"] = _snap_side("height", p["height"], notes)
     p["num_inference_steps"] = _clamp("num_inference_steps", p["num_inference_steps"], MIN_STEPS, MAX_STEPS, notes)
     p["num_images"] = _clamp("num_images", p["num_images"], 1, MAX_IMAGES, notes)
-    p["guidance_scale"] = _clamp("guidance_scale", p["guidance_scale"], 0.0, 20.0, notes)
+    p["guidance_scale"] = _clamp("guidance_scale", p["guidance_scale"], MIN_GUIDANCE, MAX_GUIDANCE, notes)
     return p, notes
 
 
@@ -327,22 +348,29 @@ def deliver(images, job_id: str, p: dict) -> list:
 # --------------------------------------------------------------------------- #
 BACKEND = load_backend()
 READY_S = time.perf_counter() - PROCESS_START
-_jobs_served = 0
+_jobs_started = 0  # every job, so a failed first job still counts as the cold one
+_jobs_served = 0  # successful ones
 
 
 def make_progress_reporter(job):
-    """Step callback that sends throttled `progress_update`s, visible in /status."""
+    """Step callback that sends throttled `progress_update`s, visible in /status.
+    Extra keyword values (training loss, say) are added to the update."""
     last_sent = [0.0]
 
-    def report(step, total):
+    def report(step, total, **extra):
         now = time.perf_counter()
         if step < total and now - last_sent[0] < PROGRESS_INTERVAL_S:
             return
         last_sent[0] = now
         if WORKER_ID:
-            runpod.serverless.progress_update(job, {"step": step, "total_steps": total})
+            runpod.serverless.progress_update(job, {"step": step, "total_steps": total, **extra})
 
     return report
+
+
+def error_detail(e: Exception) -> str:
+    """Short description of an unexpected error for the caller; the traceback is in the logs."""
+    return f"{type(e).__name__}: {str(e)[:ERROR_DETAIL_CHARS]}"
 
 
 def worker_info(cold_start: bool) -> dict:
@@ -358,45 +386,51 @@ def worker_info(cold_start: bool) -> dict:
     }
 
 
-def train_handler(job):
+def train_handler(job, cold_start: bool):
     """task=train_lora: fine-tune, upload the adapter, report timings and loss."""
     global _jobs_served
     t_start = time.perf_counter()
-    last_sent = [0.0]
+    if MODEL_PRECISION != "bf16":
+        return {"error": "LoRA training needs MODEL_PRECISION=bf16 on this endpoint"}
+    report = make_progress_reporter(job)
 
     def on_progress(step, total, loss):
-        now = time.perf_counter()
-        if step < total and now - last_sent[0] < PROGRESS_INTERVAL_S:
-            return
-        last_sent[0] = now
-        if WORKER_ID:
-            runpod.serverless.progress_update(job, {"step": step, "total_steps": total, "loss": round(loss, 4)})
+        report(step, total, loss=round(loss, 4))
 
     trainer = lora_train.MockTrainer() if MOCK_PIPELINE else lora_train.FluxTrainer(BACKEND.pipe)
     try:
-        if not MOCK_PIPELINE:
-            BACKEND.use_lora(None)  # train on the plain base model
+        BACKEND.use_lora(None)  # train on the plain base model
         result = lora_train.run_training(trainer, job.get("input"), on_progress)
     except lora_train.TrainInputError as e:
         return {"error": str(e)}
+    except lora_train.UploadError as e:
+        log.exception("training job %s: uploading the adapter failed", job.get("id"))
+        return {"error": f"training finished but uploading the adapter failed: {e}"}
     except Exception as e:
-        log.error("training job %s failed: %s\n%s", job.get("id"), e, traceback.format_exc())
+        log.exception("training job %s failed", job.get("id"))
         BACKEND.recover_from_oom()
         if "out of memory" in str(e).lower():
             return {"error": "GPU out of memory while training; try a lower resolution or rank"}
-        return {"error": f"training failed: {type(e).__name__}: {e}"}
-    cold_start = _jobs_served == 0
+        return {"error": f"training failed: {error_detail(e)}"}
     _jobs_served += 1
     result["timings"]["total_ms"] = round((time.perf_counter() - t_start) * 1000, 1)
     result["worker"] = worker_info(cold_start)
     return result
 
 
+TASKS = ("generate", "train_lora")
+
+
 def handler(job):
-    global _jobs_served
+    global _jobs_started, _jobs_served
+    cold_start = _jobs_started == 0
+    _jobs_started += 1
     raw = job.get("input")
-    if isinstance(raw, dict) and raw.get("task") == "train_lora":
-        return train_handler(job)
+    task = raw.get("task", "generate") if isinstance(raw, dict) else "generate"
+    if task not in TASKS:
+        return {"error": f"unknown task {task!r}; use one of {', '.join(TASKS)}"}
+    if task == "train_lora":
+        return train_handler(job, cold_start)
     t_start = time.perf_counter()
     job_id = job.get("id") or str(uuid.uuid4())
     try:
@@ -410,11 +444,11 @@ def handler(job):
     except InputError as e:
         return {"error": str(e)}
     except Exception as e:  # never let one bad job kill the worker loop
-        log.error("job %s failed: %s\n%s", job_id, e, traceback.format_exc())
+        log.exception("job %s failed", job_id)
         if "out of memory" in str(e).lower():
             BACKEND.recover_from_oom()
             return {"error": "GPU out of memory; try a smaller size or fewer images"}
-        return {"error": f"generation failed: {type(e).__name__}: {e}"}
+        return {"error": f"generation failed: {error_detail(e)}"}
 
     inference_ms = (time.perf_counter() - t_inf) * 1000
     try:
@@ -422,10 +456,9 @@ def handler(job):
         outputs = deliver(images, job_id, p)
         encode_ms = (time.perf_counter() - t_enc) * 1000
     except Exception as e:
-        log.error("job %s: delivering images failed: %s\n%s", job_id, e, traceback.format_exc())
-        return {"error": f"delivering images failed: {type(e).__name__}: {e}"}
+        log.exception("job %s: delivering images failed", job_id)
+        return {"error": f"delivering images failed: {error_detail(e)}"}
 
-    cold_start = _jobs_served == 0
     _jobs_served += 1
     response = {
         "images": outputs,
