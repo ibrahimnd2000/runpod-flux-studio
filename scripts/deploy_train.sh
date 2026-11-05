@@ -11,7 +11,7 @@
 # min workers 0 nothing bills until a training job arrives.
 set -euo pipefail
 
-IMAGE="${IMAGE:-docker.io/ibrahimnd2000/flux-worker:v0.3.0}"
+IMAGE="${IMAGE:-docker.io/ibrahimnd2000/flux-worker:v0.3.1}"
 : "${REGISTRY_AUTH_ID:?set REGISTRY_AUTH_ID (runpodctl registry list)}"
 : "${RUNPOD_API_KEY:?set RUNPOD_API_KEY (needed to set GPU pools)}"
 

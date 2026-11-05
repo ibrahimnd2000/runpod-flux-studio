@@ -10,7 +10,7 @@
 set -euo pipefail
 
 : "${RUNPOD_API_KEY:?set RUNPOD_API_KEY (needed to set GPU exclusions)}"
-IMAGE="${IMAGE:-docker.io/ibrahimnd2000/ltx-video-worker:v0.2.1}"
+IMAGE="${IMAGE:-docker.io/ibrahimnd2000/ltx-video-worker:v0.2.2}"
 MODEL_REF="${MODEL_REF:-https://huggingface.co/Wan-AI/Wan2.2-TI2V-5B-Diffusers:main}"
 
 if [[ -z "${TEMPLATE_ID:-}" ]]; then

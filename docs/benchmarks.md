@@ -31,7 +31,7 @@ worker waits for the next job.
 
 | Situation | `delayTime` | Where it comes from |
 |---|---|---|
-| Warm worker (within the 60 s idle timeout) | **0.13–0.18 s** | v0.2.0 run, jobs 1–7 |
+| Warm worker (within the 60 s idle timeout) | **0.13–0.14 s** | v0.2.0 run, jobs 1–7 (0.18 s in the v0.1.0 run) |
 | FlashBoot resume of a stopped worker | **34.7 s** | v0.1.0 run, job 0 |
 | New worker, image already cached on the host | **93.3 s** | v0.2.0 run, job 0 |
 | New worker on a host that never pulled the 30.6 GB image | **690.6 s** | [`docs/examples/cold-512.json`](examples/cold-512.json) |
@@ -40,8 +40,8 @@ Inside the 93.3 s case the worker reported `process_ready_s` = **15.5 s** from c
 ready, of which **8.1 s** is loading FLUX into GPU memory. The remaining ~78 s was Runpod-side (placing the
 worker, pulling the small v0.2.0 code layer, waiting for GPU capacity).
 
-On fresh hosts the 33.7 GB weights layer took **~7 min** (first host, 20:50:44 → 20:57:38 CET) and **>10 min**
-(a slower host) to download. That variance is the cost of baking 30 GB of weights into the image, and the
+On fresh hosts the 33.7 GB weights layer took **~7 min** (first host: 6 min 54 s from the start of the pull to the model loaded, per the worker log) and **>10 min**
+(a slower host) to download. That variance is the cost of baking 33.7 GB of weights (30.6 GB compressed image) into the image, and the
 reason the next experiment is Runpod model caching (see the README's next steps).
 
 ## Spot checks from the hosted app

@@ -2,11 +2,11 @@
 
 [![CI](https://github.com/ibrahimnd2000/runpod-flux-studio/actions/workflows/ci.yml/badge.svg)](https://github.com/ibrahimnd2000/runpod-flux-studio/actions/workflows/ci.yml)
 
-Text → product image with **FLUX.1-dev** on a **Runpod Serverless** GPU endpoint, plus a web app that shows,
-for every request, where the time and money went (queue, cold start, GPU time, cost per image), video
-endpoints that animate images into short clips (**Wan 2.2** and **LTX-2.5**), and an orchestration layer:
-**pipelines**, **tool-calling agents** and an **agent battleground** that drive those endpoints, with the agents
-running on Claude or on an open model served from a **Runpod vLLM endpoint**.
+Text → product image with **FLUX.1-dev** on a **Runpod Serverless** GPU endpoint, with a web app that shows
+where every request's time and money went: queue, cold start, GPU time and cost per image. On top of it: video
+endpoints that animate images into short clips (**Wan 2.2** and **LTX-2.5**), **LoRA fine-tuning** of FLUX on its
+own endpoint, and **pipelines, tool-calling agents and an agent battleground** that drive all of it, with the
+agents running on Claude or on an open model served from a **Runpod vLLM endpoint**.
 
 **Live demo:** https://t2jragqmgaorlq-3000.proxy.runpod.net (generating needs the access code sent with the submission)
 
@@ -23,16 +23,18 @@ curl -s -X POST https://api.runpod.ai/v2/y6hj5mx4y5b2su/runsync \
 | What the brief asked for | Where |
 |---|---|
 | `handler.py` that serves the model | [`workers/image/handler.py`](workers/image/handler.py), tested in [`tests/`](tests) |
-| Docker image with the handler **and the model** | [`workers/image/Dockerfile`](workers/image/Dockerfile): weights baked in (33.7 GB), private `docker.io/ibrahimnd2000/flux-worker:v0.2.0` |
+| Docker image with the handler **and the model** | [`workers/image/Dockerfile`](workers/image/Dockerfile): 33.7 GB of weights baked in (30.6 GB compressed image), private `docker.io/ibrahimnd2000/flux-worker:v0.3.1` |
 | Serverless endpoint on Runpod | `y6hj5mx4y5b2su`, created by [`scripts/deploy.sh`](scripts/deploy.sh) |
-| Text in → image out | [examples with the exact request and Runpod's response](docs/examples) · curl · Postman · web app |
+| Text in → image out | [examples with the exact request and Runpod's response](docs/examples) (recorded with v0.1.0, before the `worker` block below existed) · curl · Postman · web app |
 
-**Extras** (beyond the brief, built on top of it): measured benchmarks and a cold-start study; a hosted Next.js
-app on a Runpod CPU pod (single and parallel bulk generation, live endpoint dashboards, a media library on a
-network volume, beginner tooltips); image → video endpoints with Wan 2.2 and LTX-2.5 using Runpod model caching
-(see [Video](#video-image--clip-with-wan-22-and-ltx-25)); pipelines, agents and a battleground on top of all of it
-(see [Orchestration](#orchestration-pipelines-agents-battleground)); LoRA fine-tuning of FLUX.1-dev on a Serverless
-endpoint (see [Fine-tuning](#fine-tuning-flux-loras)); 168 automated tests in CI.
+**Extras**, beyond the brief and built on top of it:
+- Measured benchmarks and a cold-start study ([Results](#results)).
+- A hosted Next.js app on a Runpod CPU pod: single and bulk generation, live endpoint dashboards, a media library
+  on a network volume, beginner tooltips.
+- Image → video endpoints with Wan 2.2 and LTX-2.5 using Runpod model caching ([Video](#video-image--clip-with-wan-22-and-ltx-25)).
+- Pipelines, agents and a battleground ([Orchestration](#orchestration-pipelines-agents-battleground)).
+- LoRA fine-tuning of FLUX.1-dev on a Serverless endpoint ([Fine-tuning](#fine-tuning-flux-loras)).
+- 191 automated tests in CI.
 
 ## Contents
 [Results](#results) · [Quick start](#quick-start) · [API](#api) · [Video](#video-image--clip-with-wan-22-and-ltx-25) ·
@@ -70,7 +72,8 @@ Measured on 3 Nov 2026; raw data in [`bench/results/`](bench/results), method an
 *"A studio product photo of a ceramic coffee mug on a walnut table, soft morning light, shallow depth of
 field", 1024², 28 steps, seeds 42–44. Request and full response for each: [`docs/examples/`](docs/examples).*
 
-The whole build, all tests and benchmarks cost **under $1** of GPU time.
+The image worker's build, tests and benchmarks cost **under $1** of GPU time; the video, agent and LoRA runs
+measured further down add roughly another dollar.
 
 ## Quick start
 
@@ -81,9 +84,11 @@ The whole build, all tests and benchmarks cost **under $1** of GPU time.
 | ![Library](docs/screenshots/library.jpg) | ![How it works](docs/screenshots/how-it-works.jpg) |
 
 Open the [live demo](https://t2jragqmgaorlq-3000.proxy.runpod.net), enter the access code, press
-**Generate**. Switch to **Bulk · parallel** to send up to 8 images at once and watch the autoscaler spread them
-over workers (the run summary shows the speed-up). Every image lands in the **Library**. Hover any ⓘ for a
-plain-language explanation; *How it works* explains every number.
+**Generate**. **Bulk · parallel** sends up to 8 images as separate jobs: the demo endpoint runs one worker, so they
+queue one after another (with more max workers the autoscaler spreads them, and the run summary shows the
+speed-up). Every image lands in the **Library**. Hover any ⓘ for a plain-language explanation; *How it works*
+explains every number. Video clips and LoRA trainings take minutes; while a job waits for a GPU the app says
+*Waiting for a GPU*, never *running*.
 
 The same app API works from a terminal without a Runpod key:
 ```bash
@@ -106,8 +111,8 @@ set `RUNPOD_API_KEY` and `ENDPOINT_ID`; *Run sync* renders the image in the resp
 ### 3. Run the worker locally (no GPU, no credits)
 ```bash
 python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
-.venv/bin/ruff check . && .venv/bin/pytest -q              # what CI runs (49 worker/bench tests)
-(cd app && npm ci && npm test)                              # 119 app tests: fake Runpod + Anthropic, no keys
+.venv/bin/ruff check . && .venv/bin/ruff format --check . && .venv/bin/pytest -q   # what CI runs (65 tests)
+(cd app && npm ci && npm test)                              # 126 app tests: fake Runpod + Anthropic, no keys
 
 cd workers/image
 MOCK_PIPELINE=1 ../../.venv/bin/python handler.py          # one job from test_input.json (SDK local mode)
@@ -124,14 +129,15 @@ DEMO_ACCESS_CODE=pick-one npm run build && DEMO_ACCESS_CODE=pick-one npm start  
 ```
 Without `DEMO_ACCESS_CODE` the dashboards work but generating is disabled (fail closed). Without a video
 endpoint id the Animate button is hidden. Without `RUNPOD_IMAGE_ENDPOINT_ID`, Pipelines / Agent / Battleground
-run as dry runs (placeholder images, the scripted model), so the orchestration UI works with no keys at all.
+run as dry runs (placeholder images, the scripted model), so the orchestration UI works with no API keys (an
+access code is still needed).
 
 ### 5. Build and deploy your own
 ```bash
 hf auth login                                   # account that accepted the FLUX.1-dev licence
-REGISTRY_USER=<you> IMAGE_TAG=v0.2.0 scripts/build_and_push.sh    # linux/amd64, HF token as a BuildKit secret
+REGISTRY_USER=<you> IMAGE_TAG=v0.3.1 scripts/build_and_push.sh    # linux/amd64, HF token as a BuildKit secret
 runpodctl registry create ...                   # private repo → registry auth for Runpod
-REGISTRY_AUTH_ID=<id> RUNPOD_API_KEY=... scripts/deploy.sh         # template + endpoint + GPU exclusions
+IMAGE=docker.io/<you>/flux-worker:v0.3.1 REGISTRY_AUTH_ID=<id> RUNPOD_API_KEY=... scripts/deploy.sh   # template + endpoint + GPU exclusions
 python bench/bench.py run --label warm-1024 --n 20                 # benchmark → bench/results/*.jsonl
 ```
 
@@ -148,7 +154,11 @@ python bench/bench.py run --label warm-1024 --n 20                 # benchmark �
 | `seed` | int | random | 0 – 2³²−1; the seed used is always returned |
 | `num_images` | int | 1 | clamped to 1–4 (batched on one GPU) |
 | `output` | `"base64"` \| `"url"` | `"base64"` | `url` uploads to S3-compatible storage (bucket env vars on the endpoint) |
-| `image_format` | `"png"` \| `"jpeg"` | `"png"` | a base64 1024² PNG is ~1.34 MB; the app asks for JPEG |
+| `image_format` | `"png"` \| `"jpeg"` | `"png"` | a base64 1024² PNG is ~1.4 MB; the app asks for JPEG |
+| `lora` | `{id, url, scale}` | none | a LoRA to apply: `url` is https, `scale` 0–2 ([Fine-tuning](#fine-tuning-flux-loras)) |
+
+`"task": "train_lora"` switches the job to LoRA training; its input is documented at the top of
+[`lora_train.py`](workers/image/lora_train.py). Any other `task` value is an error.
 
 Out-of-range values are clamped and listed in `notes`. Unknown fields, wrong types or an empty prompt return
 `{"error": "..."}`, which Runpod reports as `status: FAILED`. `negative_prompt` is rejected on purpose:
@@ -180,7 +190,7 @@ it's the **Animate** button on any image, with a model picker.
 | Endpoint | Model | GPUs | Notes |
 |---|---|---|---|
 | `wrebsusdyaz9b5` | **Wan 2.2 TI2V-5B** (`WanImageToVideoPipeline`) | 48 GB pools (same as FLUX) | silent; keeps the input's aspect ratio at the target pixel area |
-| `ni76to0oacpj7o` | **LTX-2.5** (22B, distilled 8-step, `LTX2ImageToVideoPipeline`) | 80 GB pools (A100, H100) | generates a soundtrack with the video |
+| `ni76to0oacpj7o` | **LTX-2.5** (22B, distilled 8-step, `LTX2ImageToVideoPipeline`) | 80 GB+ pools (A100, H100, H200) | generates a soundtrack with the video |
 
 | Input | Default | Rules |
 |---|---|---|
@@ -208,7 +218,7 @@ That last row decided the default. LTX-2.5 looks better and has sound, but it ne
 that evening, so a user would have waited over an hour. Wan 2.2 runs on the same plentiful 48 GB pools as FLUX
 at a quarter of the cost per clip, so the app offers Wan first and LTX as the premium option.
 
-**How it's deployed.** The weights are big (Wan 2.2 ~34 GB, LTX-2.5 ~72 GB), so these endpoints use **Runpod
+**How it's deployed.** The weights are big (snapshots of ~34 GB for Wan 2.2 and ~72 GB for LTX-2.5), so these endpoints use **Runpod
 model caching**: the image is 8 GB (code and dependencies only) and Runpod places the weights on hosts itself,
 without billing the download. Wan isn't gated and deploys from the CLI
 ([`scripts/deploy_video_wan.sh`](scripts/deploy_video_wan.sh)); LTX-2.5 is gated, so that endpoint was created in
@@ -252,9 +262,15 @@ flow works without any key, and a **dry run** replaces GPU jobs with placeholder
 | Agent, Qwen3-8B, *frugal* persona, one-image brief | searched the library first, rendered **1 draft image**, finished in 3 turns (172 s wall, including the LLM cold start): **$0.0035 GPU** + $0.027 LLM (estimate: GPU-seconds, mostly the LLM cold start) |
 | Pipeline *Product launch kit*, Qwen3-8B | all 5 steps done: 4 FLUX images in parallel (**$0.038**, 155 s including a FLUX cold start), hero picked from the prompts (Qwen can't see images), copy written while Wan animated the hero (2 s clip, **$0.038**). Total **$0.076 GPU** + $0.028 LLM (estimate); 12 min wall, most of it the clip waiting for a throttled Wan host |
 
-Claude-driven runs and judged battles need the deployment's access code and are run from the hosted app; their
-numbers aren't claimed here yet. Costs are labelled honestly in the UI: Claude tokens are metered at list price,
-vLLM time is an estimate (GPU-seconds × the pool's price).
+| Battle, Qwen3-8B vs Claude Opus 5.5, Europa podcast covers | both delivered 3 images and a clip within the $0.25 budget: Qwen $0.107 in 307 s, Claude $0.154 in 204 s; the Claude judge ($0.049) picked Claude's bioluminescent cover, 8/8/7 vs 4/6/6 |
+
+Costs are labelled honestly in the UI: Claude tokens are metered at list price, vLLM time is an estimate
+(GPU-seconds × the pool's price). While a step waits for a GPU, the trace says so (*Waiting for a GPU*, or a cold
+LLM worker starting) instead of *running*.
+
+| A pipeline run: each step's time and cost, then the outputs | A judged battle: spend side by side and the verdict |
+|---|---|
+| ![Pipeline run](docs/screenshots/pipelines.jpg) | ![Battle verdict](docs/screenshots/battle.jpg) |
 
 ## Fine-tuning: FLUX LoRAs
 
@@ -285,7 +301,7 @@ prompt box with a strength slider.
 | Training, 800 steps | **641 s** (0.80 s/step); image download 8.8 s, encoding 6.9 s, upload 3.3 s |
 | GPU time (`executionTime`) · **cost** | 665 s · **$0.32** |
 | Adapter | 37.4 MB safetensors · final loss 0.341 |
-| Generating with it (1024², 28 steps) | 19.8 s inference vs 15.9 s without on the same GPU (+25%, one pair; the adapter isn't fused) |
+| Generating with it (1024², 28 steps) | 19.8 s inference vs 15.9 s without, same worker and seed (+25%, one pair; the adapter isn't fused) |
 | From the live Studio ("Use in Studio") | 17.0 s GPU time, **$0.0083** on an L40S; the worker's response echoes the LoRA id and strength |
 
 <table><tr>
@@ -297,10 +313,13 @@ prompt box with a strength slider.
 at strength 1.0 (right). The LoRA moves it to the training set's cold, glowing blue look; with 6 images and a
 subject that isn't in the set, the shift is clear but moderate.*
 
+![Fine-tune page: training images, presets with the measured estimate, and the trained LoRA](docs/screenshots/fine-tune.jpg)
+
 **Two platform notes from shipping it.** The account's worker quota (5 max workers summed over all endpoints) was
-full, so the image endpoint went from max 2 to max 1 to make room. And with a single max worker, the training
-endpoint's only worker was *throttled* (no free GPU on its host) for ~39 min before two test images ran; nothing
-bills while queued, but a production setup would allow more GPU pools or a second worker.
+full, so the image endpoint went from max 2 to max 1 to make room. And I ran the with/without pair above on the
+training endpoint (same worker image), whose single worker was *throttled* (no free GPU on its host) for ~39 min
+before the jobs started; nothing bills while queued, but a production setup would allow more GPU pools or a
+second worker.
 
 ## Architecture
 
@@ -317,6 +336,8 @@ flowchart LR
     MC[(Runpod model cache<br/>Wan 2.2 · LTX-2.5)] -.->|mounted on host| VW
     A -->|"agents: OpenAI route + tools"| LQ[[vLLM endpoint<br/>Qwen3-8B, 24 GB]]
     A -->|"agents + judge"| AN[Anthropic API<br/>Claude]
+    A -->|"train_lora job"| TQ[[LoRA training endpoint<br/>same image, 48 GB]]
+    TQ -.->|"PUT adapter (one-time token)"| A
 ```
 Request flow, image layers and the full diagram: [`docs/architecture.md`](docs/architecture.md).
 
@@ -326,14 +347,13 @@ Request flow, image layers and the full diagram: [`docs/architecture.md`](docs/a
 for hours. Serverless bills per second of worker time and scales to zero, so idle costs nothing; a Pod
 bills around the clock. The trade-off is the cold start, measured above and handled in decisions 4–5.
 
-**2. A 48 GB GPU pool, with one type excluded.** BF16 FLUX.1-dev peaks at 33.8 GB, so 48 GB cards run it
-without CPU offloading. 80 GB cards would cost 1.6–3× more per hour for no benefit. The endpoint uses two pools,
-`ADA_48_PRO` (L40, L40S, RTX 6000 Ada at $1.75/h) and `AMPERE_48` (A40, A6000 at $1.22/h), because L40S supply was
-low and a single type left jobs queued. Lesson learned: asking for "NVIDIA L40S" selects the whole
-`ADA_48_PRO` pool, which also contains an **RTX PRO 6000 Blackwell MIG slice** (sm_120). The image's PyTorch
-build (CUDA 12.6) has no sm_120 kernels, so those workers failed the SDK's GPU fitness check and exited. The fix
-is `gpu.excludedTypes` via the REST v2 API (runpodctl can't set it), now part of `deploy.sh`. Excluding a type
-doesn't evict workers already placed; the endpoint had to be recreated.
+**2. 48 GB GPU pools, with one type excluded.** BF16 FLUX.1-dev peaks at 33.8 GB, so 48 GB cards run it
+without CPU offloading. 80 GB cards cost 1.6–3× more per hour for no speed-up that matters here. The endpoint
+uses two pools, `ADA_48_PRO` (L40, L40S, RTX 6000 Ada at $1.75/h) and `AMPERE_48` (A40, A6000 at $1.22/h),
+because a single type left jobs queued. `ADA_48_PRO` also contains a Blackwell MIG slice this image can't run, so
+it is excluded (see [Platform notes](#platform-notes)). For the review window,
+[`warm_demo.sh`](scripts/warm_demo.sh) adds the 80 GB A100 pool *after* these as a fallback, because 48 GB GPUs ran
+short on 4 Nov and left jobs queued; it only bills when a job lands there.
 
 **3. Weights baked into the image.** The brief asks for "the handler and the model" in the image, and it gives
 the most predictable runtime: no Hugging Face call or token on workers (`HF_HUB_OFFLINE=1`), and the model loads
@@ -346,25 +366,25 @@ measured. Alternatives:
 
 Layer order (deps → weights → code) means a handler change pushes a few KB; v0.1.0 → v0.2.0 took 5 s.
 
-**4. Workers: min 0, max 2 (now 1), idle timeout 60 s, FlashBoot on.** Min 0 means no idle spend for a demo. 60 s keeps
-a worker warm across a user's burst of edits (0.1 s queue instead of 35–93 s). Max 2 let the autoscaler run
-jobs in parallel (the app's bulk mode shows the speed-up) and capped the worst-case spend at about $3.50/h. The
-account's quota is 5 workers across all endpoints, so I later lowered it to 1 to free a slot for the LoRA
-training endpoint; bulk jobs now queue one after another. For a
-production interactive path I'd run **1 active worker** (always on; Runpod's pricing page offers discounts for
-active workers on request) so the first request
-of the day never sees a cold start, and keep the flex workers for bursts.
+**4. Workers: min 0, max 1, idle timeout 60 s, FlashBoot on.** Min 0 means no idle spend for a demo, and max 1
+caps the worst-case spend at about $1.75/h. 60 s keeps a worker warm across a user's burst of edits (0.1 s queue
+instead of 35–93 s). The endpoint ran max 2 until the account's quota (5 workers across all endpoints) needed a
+slot for the LoRA training endpoint; bulk jobs now queue one after another. For a production interactive path
+I'd run **1 active worker** (always on; Runpod offers discounts for active workers on request) so the first
+request of the day never sees a cold start, and keep flex workers for bursts. That is what
+[`warm_demo.sh on`](scripts/warm_demo.sh) does for the review window: min 1 on the image and LLM endpoints
+(about $1.75/h + $1.34/h at list price), and `off` returns to scale-to-zero.
 
 **5. `/run` + polling in the app, `/runsync` for scripts.** Async jobs survive multi-minute cold starts, show step
 progress and keep results for ~30 min. `/runsync` (results kept ~1 min) is the simplest call for curl.
 
-**6. Base64 by default, URLs when it matters.** A 1024² PNG is ~1.34 MB of base64 per image, fine for one image
-per call. The handler can upload to S3-compatible storage (`output: "url"`) to keep payloads small for batches
-and video; the app requests JPEG.
+**6. Base64 by default, URLs when it matters.** A 1024² PNG is ~1.4 MB of base64 per image, fine for one image
+per call. The image handler can upload to S3-compatible storage (`output: "url"`) to keep payloads small for
+batches; the app requests JPEG. The video handler returns base64 and refuses clips over 15 MB.
 
-**7. Licensing.** FLUX.1-dev is **non-commercial**. For a paid product, switch to FLUX.1-schnell or another
-Apache-2.0 model. The handler only needs a new `MODEL_ID`, and the brief's worked example is kept here. LTX-2.5,
-planned for video, is free for commercial use under $10M annual revenue (LTX-2.x Community License).
+**7. Licensing.** FLUX.1-dev is **non-commercial**, and so are LoRAs trained on it. For a paid product, switch to
+FLUX.1-schnell or another Apache-2.0 model; the handler only needs a new `MODEL_ID`. Wan 2.2 and Qwen3-8B are
+Apache-2.0. LTX-2.5 is free for commercial use under $10M annual revenue (LTX-2.x Community License).
 
 **8. Secrets never in code, images or logs.** The HF token is a BuildKit secret and never lands in a layer. The
 Runpod key and access code are Runpod Secrets on the app pod. The browser never sees the key; `.env` is gitignored.
@@ -372,10 +392,10 @@ Runpod key and access code are Runpod Secrets on the app pod. The browser never 
 **9. FP8.** The handler has an FP8 path (torchao `Float8WeightOnlyConfig`), but it is **not measured yet**, so no
 claims here.
 
-**10. Two endpoints, not one.** Image and video differ in GPU class (48 GB vs 80 GB), job length (seconds vs
-minutes) and price per hour. Separate endpoints scale independently, so a burst of video jobs can't queue image
-requests behind them, and each pays only for the GPU it needs. The app also keeps separate job stores and daily
-caps for the two.
+**10. One endpoint per workload.** Image, video, training and LLM jobs differ in length (seconds, minutes, ten
+minutes, sub-second), GPU needs (48 GB, 48 GB for Wan but 80 GB for LTX, 48 GB, 24 GB) and worker settings.
+Separate endpoints scale independently, so a burst of clips or a training can't queue Studio images behind it,
+and each pays only for the GPU it needs. The app keeps separate job stores and daily caps for each.
 
 **11. Model caching for the video weights.** Baking worked well for FLUX (30.6 GB, 8.1 s model load) because the
 brief asked for it and the image is pullable in minutes. At 72 GB, baking would make every new host pull ~80 GB
@@ -417,8 +437,9 @@ Things found while deploying, worth knowing for anyone building on Runpod (all h
   already-cached URL could only be escaped with a new pod.
 - **CPU pods don't get a pod volume** (`volumeInGb` was ignored); the app's history and library use a network
   volume instead.
-- **FlashBoot can resume a worker on the old image.** After a template moved to a fixed image (v0.2.1), two jobs
-  still ran on a FlashBoot-resumed v0.2.0 worker. What worked: FlashBoot off, max workers 0 until `/health`
+- **FlashBoot can resume a worker on the old image.** After the Wan template moved to a fixed image
+  (`ltx-video-worker:v0.2.1`), two jobs still ran on a FlashBoot-resumed v0.2.0 worker, and the same happened when
+  the FLUX template moved to v0.3.0 (the first LoRA job failed with "lora is not a valid input option"). What worked: FlashBoot off, max workers 0 until `/health`
   showed no workers, then max 1 and FlashBoot back on. The REST v2 value is `"flashboot": "FLASHBOOT"`
   (`OFF | FLASHBOOT | PRIORITY_FLASHBOOT`), not `"ON"`.
 - **Right after un-pausing**, `/run` returns `409 ENDPOINT_PAUSED` for a few seconds; retry.
@@ -445,22 +466,25 @@ Things found while deploying, worth knowing for anyone building on Runpod (all h
 
 ## Cost and business case
 
-**Use case:** small e-commerce sellers who need on-brand product images (and, next, 5-second social clips)
-without a photo shoot.
+**Use case:** small e-commerce sellers who need on-brand product images and short social clips without a photo
+shoot.
 
-Measured unit cost: **$0.0107 per 1024² image** of GPU execution. On top of that, each burst of activity
-pays for the warm worker's idle timeout (60 s × $1.75/h ≈ $0.03) and, if cold, the model load.
+Measured unit costs: **$0.0107 per 1024² image** and **$0.042 per 2 s Wan 2.2 clip** (one sample) of GPU
+execution. On top of that, each burst of activity pays for the warm worker's idle timeout (60 s × $1.75/h ≈ $0.03)
+and, if cold, the model load.
 
-| Plan: $29/month, 300 images | |
+| Plan: $29/month, 300 images + 30 five-second clips | |
 |---|---|
-| GPU execution, 300 × $0.0107 | $3.21 |
+| Images, 300 × $0.0107 (measured) | $3.21 |
+| Clips, 30 × ~$0.105 (estimate: the measured 2 s clip scaled to 121 frames) | ~$3.15 |
 | Idle timeouts, if spread over 60 sessions (estimate) | $1.75 |
-| **GPU cost per subscriber** | **≈ $5**, so **~83% gross margin** before app hosting (~$0.06/h CPU pod) |
+| **GPU cost per subscriber** | **≈ $8**, so **~72% gross margin** before app hosting (~$0.06/h CPU pod) |
 
 The honest risk: generation itself is a commodity. Per-image and per-second video APIs keep getting cheaper, so
 the value is in what a platform like this makes easy: brand LoRAs trained on a seller's products, bundling
 image + clip + copy, and data control. For Runpod, this is recurring GPU spend that follows the customer's
-growth: 10,000 images a month is about **61 GPU-hours** at the measured 21.9 s per image (video multiplies that).
+growth: 10,000 images a month is about **61 GPU-hours** at the measured 21.9 s per image, and 10,000 five-second
+clips about **600 GPU-hours** on 48 GB cards (estimate from the same 2 s sample).
 
 ## Limitations and next steps
 - **Video benchmark:** one clip per model so far; next, a small benchmark (540p/720p, 2 s/5 s, warm vs cold) for
@@ -478,7 +502,7 @@ growth: 10,000 images a month is about **61 GPU-hours** at the measured 21.9 s p
 - **FP8 and step caching:** measure speed, quality and $/image against BF16.
 - **Autoscaling policy:** load-test bursts (20–40 jobs) to tune max workers and the queue-delay threshold.
 - **Production hardening:** a safety filter on prompts/images, structured metrics (queue time, cold-start rate,
-  $/image per customer), alerts on `unhealthy` workers, S3 storage for the library instead of a pod volume.
+  $/image per customer), alerts on `unhealthy` workers, S3 storage for the library instead of a network volume.
 - **Known demo limits:** the app's daily cap and rate limit are per pod instance; a job in flight while the app
   pod restarts is lost from the app's view (it still completes on Runpod).
 
@@ -486,9 +510,9 @@ growth: 10,000 images a month is about **61 GPU-hours** at the measured 21.9 s p
 ```
 workers/image/     FLUX.1-dev Serverless worker: handler.py, lora_train.py (LoRA training), Dockerfile (deps → check → weights → final)
 workers/video/     Wan 2.2 / LTX-2.5 image-to-video worker: handler.py, Dockerfile (weights via model caching)
-tests/             image + video handler tests with mocked pipelines, benchmark report tests (run in CI)
-app/tests/         Vitest: limits, library, pipelines, tools + budgets, agent loop, Claude/vLLM adapters,
-                   battles + Elo, every API route against a fake Runpod API (run in CI)
+tests/             image, LoRA training and video handler tests with mocked pipelines, benchmark report tests (CI)
+app/tests/         Vitest: limits, library, persistence, pipelines, tools + budgets, agent loop, Claude/vLLM
+                   adapters, battles + Elo, LoRAs, every API route against a fake Runpod API (CI)
 bench/             bench.py (Runpod delayTime/executionTime, cost), prices.yaml, raw results
 app/               Next.js 16 app: Studio, bulk, library, Animate, dashboards, Pipelines, Agent, Battleground, Fine-tune
 scripts/           build_and_push.sh, deploy.sh (image endpoint), deploy_video.sh, deploy_video_wan.sh,

@@ -2,7 +2,7 @@
   "info": {
     "name": "Runpod FLUX + LTX endpoints",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
-    "description": "Set RUNPOD_API_KEY, ENDPOINT_ID (FLUX image endpoint) and, for video, VIDEO_ENDPOINT_ID and IMAGE_URL (an https URL of a JPEG/PNG, e.g. a FLUX output). Image: /runsync returns the image inline (base64 PNG in output.images[0]); /run + /status is the async pattern. Video: always /run + /status (clips take minutes on a cold worker); output.video is a base64 MP4 with audio."
+    "description": "Set RUNPOD_API_KEY, ENDPOINT_ID (FLUX image endpoint) and, for video, VIDEO_ENDPOINT_ID and IMAGE_URL (an https URL of a JPEG/PNG, e.g. a FLUX output). Image: /runsync returns the image inline (base64 PNG in output.images[0]); /run + /status is the async pattern. Video: always /run + /status (clips take minutes on a cold worker); output.video is a base64 MP4 (with audio on the LTX-2.5 endpoint; Wan 2.2 is silent). VIDEO_ENDPOINT_ID can be either video endpoint."
   },
   "variable": [
     {
@@ -165,7 +165,7 @@
       }
     },
     {
-      "name": "Video (LTX-2.5)",
+      "name": "Video (Wan 2.2 or LTX-2.5)",
       "item": [
         {
           "name": "Animate: run async",

@@ -8,7 +8,10 @@
 #                           (set USE_ANTHROPIC_SECRET=1 once it exists)
 #
 # Optional endpoint ids: RUNPOD_WAN_ENDPOINT_ID, RUNPOD_VIDEO_ENDPOINT_ID (video),
-# RUNPOD_LLM_ENDPOINT_ID + RUNPOD_LLM_MODEL (open-model agents, scripts/deploy_llm.sh).
+# RUNPOD_LLM_ENDPOINT_ID + RUNPOD_LLM_MODEL (open-model agents, scripts/deploy_llm.sh),
+# RUNPOD_TRAIN_ENDPOINT_ID (LoRA fine-tuning, scripts/deploy_train.sh; the workers reach
+# the app at its pod proxy URL, or APP_PUBLIC_URL if set). IMAGE_MAX_WORKERS (default 1)
+# should match the image endpoint's max workers.
 #
 #   export RUNPOD_API_KEY=...            # your key, only to call the pods API
 #   export RUNPOD_IMAGE_ENDPOINT_ID=...
@@ -23,7 +26,7 @@ set -euo pipefail
 : "${RUNPOD_IMAGE_ENDPOINT_ID:?set RUNPOD_IMAGE_ENDPOINT_ID}"
 : "${NETWORK_VOLUME_ID:?set NETWORK_VOLUME_ID (job history lives on it)}"
 : "${DATA_CENTER_ID:?set DATA_CENTER_ID (data center of the network volume)}"
-APP_IMAGE="${APP_IMAGE:-docker.io/ibrahimnd2000/flux-studio-app:v0.2.1}"
+APP_IMAGE="${APP_IMAGE:-docker.io/ibrahimnd2000/flux-studio-app:v0.5.3}"
 
 # runpodctl can't choose a CPU flavor/size, so this uses the REST v1 pods API.
 BODY=$(APP_IMAGE="$APP_IMAGE" NETWORK_VOLUME_ID="$NETWORK_VOLUME_ID" DATA_CENTER_ID="$DATA_CENTER_ID" python3 - <<'PY'
@@ -52,7 +55,10 @@ print(json.dumps({
         "RUNPOD_VIDEO_ENDPOINT_ID": os.environ.get("RUNPOD_VIDEO_ENDPOINT_ID", ""),
         # Optional: open-model agents on a Runpod vLLM endpoint.
         "RUNPOD_LLM_ENDPOINT_ID": os.environ.get("RUNPOD_LLM_ENDPOINT_ID", ""),
+        # Optional: LoRA fine-tuning.
         "RUNPOD_TRAIN_ENDPOINT_ID": os.environ.get("RUNPOD_TRAIN_ENDPOINT_ID", ""),
+        **({"APP_PUBLIC_URL": os.environ["APP_PUBLIC_URL"]} if os.environ.get("APP_PUBLIC_URL") else {}),
+        "IMAGE_MAX_WORKERS": os.environ.get("IMAGE_MAX_WORKERS", "1"),
         "RUNPOD_LLM_MODEL": os.environ.get("RUNPOD_LLM_MODEL", "Qwen/Qwen3-8B"),
         **({"ANTHROPIC_API_KEY": "{{ RUNPOD_SECRET_anthropic_api_key }}"} if os.environ.get("USE_ANTHROPIC_SECRET") == "1" else {}),
         "VIDEO_DAILY_CAP": "20",

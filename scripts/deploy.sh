@@ -9,7 +9,7 @@
 # until the first request wakes a worker.
 set -euo pipefail
 
-IMAGE="${IMAGE:-docker.io/ibrahimnd2000/flux-worker:v0.1.0}"
+IMAGE="${IMAGE:-docker.io/ibrahimnd2000/flux-worker:v0.3.1}"
 : "${REGISTRY_AUTH_ID:?set REGISTRY_AUTH_ID (runpodctl registry list)}"
 : "${RUNPOD_API_KEY:?set RUNPOD_API_KEY (needed to set GPU exclusions)}"
 
@@ -25,7 +25,7 @@ WORKERS_MAX="${WORKERS_MAX:-1}"     # 2 lets another host take a job a throttled
 IDLE_TIMEOUT="${IDLE_TIMEOUT:-60}"  # seconds a warm worker waits for the next job (billed)
 EXEC_TIMEOUT="${EXEC_TIMEOUT:-600}" # max seconds per job
 
-# Container disk holds the cached image (~38 GB) plus scratch space.
+# Container disk holds the unpacked image (~41 GB) plus scratch space (LoRA cache, outputs).
 # Set TEMPLATE_ID to reuse an existing template instead of creating one.
 if [[ -z "${TEMPLATE_ID:-}" ]]; then
   TEMPLATE_ID=$(runpodctl template create \

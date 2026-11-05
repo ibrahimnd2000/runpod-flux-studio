@@ -4,7 +4,7 @@
 #   hf auth login                  # or: export HF_TOKEN=... (needs FLUX.1-dev access)
 #   export REGISTRY=docker.io      # or ghcr.io
 #   export REGISTRY_USER=<user>
-#   export IMAGE_TAG=v0.1.0
+#   export IMAGE_TAG=v0.3.1
 #   scripts/build_and_push.sh
 #
 # The token is passed as a BuildKit secret, so it never appears in a layer, in
@@ -22,7 +22,7 @@ else
 fi
 : "${REGISTRY_USER:?REGISTRY_USER must be set}"
 REGISTRY="${REGISTRY:-docker.io}"
-IMAGE_TAG="${IMAGE_TAG:-v0.1.0}"
+IMAGE_TAG="${IMAGE_TAG:-v0.3.1}"
 IMAGE="${REGISTRY}/${REGISTRY_USER}/flux-worker:${IMAGE_TAG}"
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
