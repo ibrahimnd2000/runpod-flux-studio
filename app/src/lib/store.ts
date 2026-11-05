@@ -77,8 +77,27 @@ export function history(): JobRecord[] {
   return [...store.done.values()].sort((a, b) => b.submittedAt - a.submittedAt);
 }
 
+// Jobs that passed the limit checks but aren't recorded yet (their /run call is in
+// flight). Counted against the daily cap, so parallel requests can't all slip past it.
+let inFlight = 0;
+
+/**
+ * Holds `n` image slots for a visitor right after checkAccess, before any await, and
+ * notes them against the per-visitor rate limit. Call the returned release() once the
+ * jobs are recorded with addPending (or failed to submit).
+ */
+export function reserveImages(ip: string, n: number): () => void {
+  inFlight += n;
+  for (let i = 0; i < n; i++) noteIp(ip);
+  let open = true;
+  return () => {
+    if (open) inFlight -= n;
+    open = false;
+  };
+}
+
 export function submittedSince(ts: number): number {
-  let n = 0;
+  let n = inFlight;
   for (const p of store.pending.values()) if (p.submittedAt >= ts) n++;
   for (const r of store.done.values()) if (r.submittedAt >= ts) n++;
   return n;

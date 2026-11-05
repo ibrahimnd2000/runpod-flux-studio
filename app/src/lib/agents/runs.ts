@@ -100,6 +100,22 @@ export function addSpend(state: RunState, delta: Partial<Spend>) {
   for (const [k, v] of Object.entries(delta) as [keyof Spend, number][]) s[k] += v;
 }
 
+/**
+ * Counts an estimated spend against the run right away (same tick as the budget check),
+ * so parallel tool calls or pipeline branches can't all pass the check. The returned
+ * settle() swaps the estimate for what was actually spent; call it exactly once.
+ */
+export function reserveSpend(state: RunState, estimate: Partial<Spend>): (actual: Partial<Spend>) => void {
+  addSpend(state, estimate);
+  let open = true;
+  return (actual) => {
+    if (!open) return;
+    open = false;
+    const keys = new Set([...Object.keys(estimate), ...Object.keys(actual)] as (keyof Spend)[]);
+    addSpend(state, Object.fromEntries([...keys].map((k) => [k, (actual[k] ?? 0) - (estimate[k] ?? 0)])));
+  };
+}
+
 export const totalUsd = (s: Spend) => s.gpuUsd + s.llmUsd;
 
 export function finishRun(state: RunState, status: RunStatus, result?: RunResult, error?: string) {
@@ -110,10 +126,6 @@ export function finishRun(state: RunState, status: RunStatus, result?: RunResult
   store.live.delete(v.id);
   while (store.done.size > MAX_KEPT) store.done.delete(store.done.keys().next().value!);
   append(runsFile, v);
-}
-
-export function getRunState(id: string) {
-  return store.live.get(id);
 }
 
 export function getRun(id: string): RunView | undefined {

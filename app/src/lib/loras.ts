@@ -199,13 +199,17 @@ export async function syncLoras(): Promise<LoraView[]> {
 const fileFor = (id: string) => join(dir, `${id}.safetensors`);
 const hasFile = (id: string) => (dir ? existsSync(fileFor(id)) : store.memory.has(id));
 
-/** The training worker's upload. Accepted once, only with the job's token, only while training. */
-export function acceptUpload(id: string, token: string | null, bytes: Buffer): void {
+/** Throws unless `token` is the one-time upload token of a LoRA that is still training. */
+export function checkUploadToken(id: string, token: string | null): Record_ {
   const r = getLora(id);
   if (!r || r.status !== "training" || !r.tokenHash || !token) throw new LimitError("Upload not accepted.", 403);
-  const want = Buffer.from(r.tokenHash, "hex");
-  const got = hash(token);
-  if (!timingSafeEqual(want, got)) throw new LimitError("Upload not accepted.", 403);
+  if (!timingSafeEqual(Buffer.from(r.tokenHash, "hex"), hash(token))) throw new LimitError("Upload not accepted.", 403);
+  return r;
+}
+
+/** The training worker's upload. Accepted once, only with the job's token, only while training. */
+export function acceptUpload(id: string, token: string | null, bytes: Buffer): void {
+  const r = checkUploadToken(id, token);
   if (bytes.length === 0 || bytes.length > LORA_LIMITS.maxBytes) throw new LimitError("The adapter file is empty or too large.", 413);
   if (dir) {
     mkdirSync(dir, { recursive: true });

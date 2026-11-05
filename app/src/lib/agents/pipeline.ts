@@ -5,7 +5,7 @@ import { LimitError } from "../limits";
 import { readMedia } from "../media";
 import { animateImage, generateImages, MEASURED, type GpuCtx } from "./gpu";
 import { complete } from "./providers";
-import { addSpend, emit, finishRun, setPhase, totalUsd, type RunState } from "./runs";
+import { addSpend, emit, finishRun, reserveSpend, setPhase, totalUsd, type RunState } from "./runs";
 import { imageCost } from "./tools";
 
 // Deterministic workflows: a list of steps whose dependencies form a DAG. A step
@@ -183,11 +183,13 @@ async function llmCall(ctx: Ctx, text: string, images?: { mime: "image/jpeg"; da
   return t.texts.join("\n").trim();
 }
 
+/** Checks the run's budget and reserves the step's estimated spend (see reserveSpend); returns settle(). */
 function checkBudget(ctx: Ctx, usd: number, images = 0, videos = 0) {
   const { budget, spend } = ctx.run.view;
   if (spend.images + images > budget.maxImages) throw new LimitError(`Image budget: ${budget.maxImages - spend.images} left, this step needs ${images}.`, 400);
   if (spend.videos + videos > budget.maxVideos) throw new LimitError("Video budget: no clips left for this run.", 400);
   if (totalUsd(spend) + usd > budget.maxUsd) throw new LimitError(`Budget: this step costs ~$${usd.toFixed(3)}, $${(budget.maxUsd - totalUsd(spend)).toFixed(3)} left.`, 400);
+  return reserveSpend(ctx.run, { gpuUsd: usd, images, videos });
 }
 
 const firstImage = (o?: StepOutput) => ({ id: o?.mediaIds?.[0], prompt: o?.prompts?.[0] ?? "" });
@@ -214,11 +216,17 @@ async function runStep(step: PipelineStep, ctx: Ctx): Promise<{ out: StepOutput;
     case "image":
     case "images": {
       const prompts = step.type === "image" ? [r(step.prompt!)] : (ctx.outputs.get(step.from!)?.list ?? []).map((item) => r(step.prompt || "{{item}}", item));
-      checkBudget(ctx, imageCost(size) * prompts.length, prompts.length);
-      const results = await generateImages(ctx.gpu, prompts, size);
+      const settle = checkBudget(ctx, imageCost(size) * prompts.length, prompts.length);
+      let results: Awaited<ReturnType<typeof generateImages>>;
+      try {
+        results = await generateImages(ctx.gpu, prompts, size);
+      } catch (e) {
+        settle({});
+        throw e;
+      }
       const ok = results.filter((x) => x.mediaId);
       const cost = results.reduce((a, x) => a + x.costUsd, 0);
-      addSpend(ctx.run, { gpuUsd: cost, images: ok.length });
+      settle({ gpuUsd: cost, images: ok.length });
       if (!ok.length) throw new LimitError(results[0]?.error ?? "No image was generated.", 502);
       return {
         out: { mediaIds: ok.map((x) => x.mediaId!), prompts: ok.map((x) => x.prompt) },
@@ -251,9 +259,15 @@ async function runStep(step: PipelineStep, ctx: Ctx): Promise<{ out: StepOutput;
       const src = firstImage(ctx.outputs.get(step.from!));
       if (!src.id) throw new LimitError("Nothing to animate.", 400);
       const seconds = step.seconds ?? 2;
-      checkBudget(ctx, MEASURED.videoUsdPerS * seconds, 0, 1);
-      const v = await animateImage(ctx.gpu, src.id, r(step.prompt || "subtle camera motion"), seconds);
-      addSpend(ctx.run, { gpuUsd: v.costUsd, videos: v.mediaId ? 1 : 0 });
+      const settle = checkBudget(ctx, MEASURED.videoUsdPerS * seconds, 0, 1);
+      let v: Awaited<ReturnType<typeof animateImage>>;
+      try {
+        v = await animateImage(ctx.gpu, src.id, r(step.prompt || "subtle camera motion"), seconds);
+      } catch (e) {
+        settle({});
+        throw e;
+      }
+      settle({ gpuUsd: v.costUsd, videos: v.mediaId ? 1 : 0 });
       if (!v.mediaId) throw new LimitError(v.error ?? "The video job failed.", 502);
       return { out: { mediaIds: [v.mediaId], prompts: [src.prompt] }, summary: `${seconds} s clip (${v.model})`, costUsd: v.costUsd };
     }

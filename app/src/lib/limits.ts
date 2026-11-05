@@ -3,9 +3,9 @@ import "server-only";
 import { timingSafeEqual } from "node:crypto";
 
 import { config, videoModels } from "./config";
-import { submittedByIpSince, submittedSince } from "./store";
+import { noteIp, reserveImages, submittedByIpSince, submittedSince } from "./store";
 import type { AnimateInput, GenerateInput } from "./types";
-import { videosSubmittedSince } from "./videoStore";
+import { reserveVideo, videosSubmittedSince } from "./videoStore";
 
 // Every Generate spends GPU credits, so the public demo is guarded by an access
 // code, a per-IP rate limit, a daily job cap and tighter size/step limits than the
@@ -20,10 +20,16 @@ export class LimitError extends Error {
   }
 }
 
-/** The JSON body of a request; a malformed or missing body is the caller's mistake (400), not ours. */
+// Route handlers don't cap request bodies; the largest legitimate one (a pipeline spec) is a few KB.
+const MAX_JSON_BYTES = 256 * 1024;
+
+/** The JSON body of a request; a malformed, missing or oversized body is the caller's mistake (4xx), not ours. */
 export async function readJson<T = unknown>(req: Request): Promise<T> {
+  if (Number(req.headers.get("content-length") ?? 0) > MAX_JSON_BYTES) throw new LimitError("The request body is too large.", 413);
+  const text = await req.text();
+  if (text.length > MAX_JSON_BYTES) throw new LimitError("The request body is too large.", 413);
   try {
-    const body = await req.json();
+    const body = JSON.parse(text);
     if (body === null || typeof body !== "object" || Array.isArray(body)) throw new Error("not an object");
     return body as T;
   } catch {
@@ -31,8 +37,18 @@ export async function readJson<T = unknown>(req: Request): Promise<T> {
   }
 }
 
+/**
+ * The visitor's IP for rate limiting. Runpod's proxy sits behind Cloudflare, which sets
+ * cf-connecting-ip itself (a client can't forge it); the first X-Forwarded-For entry is
+ * whatever the client sent, so it's only the last resort.
+ */
 export function clientIp(req: Request): string {
-  return req.headers.get("x-forwarded-for")?.split(",")[0].trim() || req.headers.get("x-real-ip") || "unknown";
+  return (
+    req.headers.get("cf-connecting-ip") ||
+    req.headers.get("x-real-ip") ||
+    req.headers.get("x-forwarded-for")?.split(",")[0].trim() ||
+    "unknown"
+  );
 }
 
 function codeMatches(given: string): boolean {
@@ -52,8 +68,12 @@ export function checkCode(code: string | null) {
   if (!code || !codeMatches(code)) throw new LimitError("Wrong or missing access code.", 401);
 }
 
-/** Checks the access code and that `count` more images fit in the daily cap and the visitor's rate limit. */
-export function checkAccess(code: string | null, ip: string, count = 1) {
+/**
+ * Checks the access code and that `count` more images fit in the daily cap and the
+ * visitor's rate limit, then reserves them (synchronously, so parallel requests can't
+ * all pass). Call the returned release() after addPending, or when the submit fails.
+ */
+export function checkAccess(code: string | null, ip: string, count = 1): () => void {
   if (!config.accessCode) throw new LimitError("Generation is disabled on this deployment (no access code set).", 503);
   checkCode(code);
   const usedToday = submittedSince(startOfUtcDay());
@@ -68,10 +88,12 @@ export function checkAccess(code: string | null, ip: string, count = 1) {
       `Rate limit: ${config.perIpPer10Min} images per 10 minutes per visitor; ${Math.max(config.perIpPer10Min - usedByIp, 0)} available now.`,
       429,
     );
+  return reserveImages(ip, count);
 }
 
-/** Video: access code, its own daily cap (clips cost ~10x an image) and the shared per-visitor rate limit. */
-export function checkVideoAccess(code: string | null, ip: string) {
+/** Video: access code, its own daily cap (clips cost ~10x an image) and the shared per-visitor rate limit.
+ *  Reserves the clip like checkAccess does; call the returned release() after addVideoPending. */
+export function checkVideoAccess(code: string | null, ip: string): () => void {
   if (!videoModels().length) throw new LimitError("Video generation isn't enabled on this deployment.", 503);
   checkCode(code);
   const used = videosSubmittedSince(startOfUtcDay());
@@ -79,6 +101,8 @@ export function checkVideoAccess(code: string | null, ip: string) {
     throw new LimitError(`Daily demo cap of ${config.videoDailyCap} videos reached; resets at 00:00 UTC.`, 429);
   if (submittedByIpSince(ip, Date.now() - 10 * 60_000) >= config.perIpPer10Min)
     throw new LimitError(`Rate limit: ${config.perIpPer10Min} jobs per 10 minutes per visitor.`, 429);
+  noteIp(ip);
+  return reserveVideo();
 }
 
 const clamp = (v: unknown, lo: number, hi: number, fallback: number) => {
@@ -125,7 +149,7 @@ export function sanitizeAnimate(body: Record<string, unknown>): AnimateInput {
     prompt,
     resolution: body.resolution === "720p" ? "720p" : "540p",
     num_frames: Math.min(Math.round((frames - 1) / 8) * 8 + 1, config.videoMaxFrames),
-    audio: body.audio !== false,
+    audio: model === "ltx2" && body.audio !== false, // Wan 2.2 is silent
   };
   if (body.seed !== undefined && body.seed !== null && body.seed !== "") input.seed = clamp(body.seed, 0, 2 ** 32 - 1, 0);
   return input;

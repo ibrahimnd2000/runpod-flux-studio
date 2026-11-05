@@ -26,7 +26,8 @@ export async function GET(req: Request) {
   const q = new URL(req.url).searchParams;
   const model = q.get("model") === "ltx2" ? "ltx2" : "wan22";
   const endpointId = q.get("which") === "video" ? config.videoEndpoints[model] : config.endpointId;
-  if (!endpointId) return Response.json({ error: "No video endpoint configured." }, { status: 404 });
+  if (!endpointId)
+    return Response.json({ error: `No ${q.get("which") === "video" ? `${model} video` : "image"} endpoint configured.` }, { status: 404 });
   const hit = cache.get(endpointId);
   if (hit && Date.now() - hit.at < 4000) return Response.json(hit.view);
   try {

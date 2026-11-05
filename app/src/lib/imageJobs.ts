@@ -1,6 +1,6 @@
 import "server-only";
 
-import { saveImage } from "./media";
+import { saveMedia } from "./media";
 import { requestCost } from "./prices";
 import { jobStatus } from "./runpod";
 import { finish, getPending, getRecord } from "./store";
@@ -40,9 +40,10 @@ export async function refreshImageJob(id: string): Promise<JobView | null> {
     const { images, ...meta } = out as HandlerOutput;
     view.output = { ...meta, image: `data:image/jpeg;base64,${images[0]}` };
     view.costUsd = requestCost(meta.worker?.gpu, s.executionTime);
-    saveImage(
+    saveMedia(
       {
         id,
+        kind: "image",
         createdAt: Date.now(),
         prompt: pending.input.prompt,
         width: pending.input.width,

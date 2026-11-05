@@ -10,7 +10,3 @@ export function requestCost(gpu: string | undefined, executionMs: number | undef
   if (!gpu || executionMs === undefined || !(gpu in perHour)) return undefined;
   return (executionMs / 1000) * (perHour[gpu] / 3600);
 }
-
-export function pricePerHour(gpu: string): number | undefined {
-  return perHour[gpu];
-}

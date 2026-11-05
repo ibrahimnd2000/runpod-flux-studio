@@ -78,7 +78,7 @@ export function endpointConfig(endpointId = config.endpointId) {
 }
 
 // --------------------------------------------------------------------------- //
-//                         Image-to-video (LTX-2.5) endpoint                   //
+//                Image-to-video endpoints (Wan 2.2, LTX-2.5)                  //
 // --------------------------------------------------------------------------- //
 export interface VideoJobInput {
   image: string; // data URI of a library image

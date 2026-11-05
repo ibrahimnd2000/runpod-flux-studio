@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { checkAccess, checkCode, LimitError, sanitizeAnimate, sanitizeInput } from "@/lib/limits";
+import { checkAccess, checkCode, LimitError, readJson, sanitizeAnimate, sanitizeInput } from "@/lib/limits";
 import { deleteImage, getMediaItem, isValidId, listMedia, mediaUsage, readMedia, saveMedia } from "@/lib/media";
-import { pricePerHour, requestCost } from "@/lib/prices";
-import { addPending, finish, history, isKnown, noteIp, submittedByIpSince, submittedSince } from "@/lib/store";
+import { requestCost } from "@/lib/prices";
+import { addPending, finish, history, isKnown, submittedByIpSince, submittedSince } from "@/lib/store";
 
 const JPEG = Buffer.from("fake-jpeg-bytes").toString("base64");
 
@@ -51,8 +51,25 @@ describe("sanitizeAnimate", () => {
     }
   });
 
-  it("defaults to 540p with audio on", () => {
-    expect(sanitizeAnimate({ sourceId: "abcdefgh", prompt: "pan" })).toMatchObject({ resolution: "540p", audio: true });
+  it("defaults to 540p, with audio only where the model has it (LTX-2.5)", () => {
+    // No video endpoint is configured in this file, so there is no LTX to give audio.
+    expect(sanitizeAnimate({ sourceId: "abcdefgh", prompt: "pan" })).toMatchObject({ resolution: "540p", audio: false });
+  });
+});
+
+describe("request bodies", () => {
+  const post = (body: string, headers: Record<string, string> = {}) => new Request("http://t/x", { method: "POST", body, headers });
+
+  it("rejects oversized bodies, whether or not they declare their length", async () => {
+    const big = JSON.stringify({ prompt: "x".repeat(300 * 1024) });
+    await expect(readJson(post(big))).rejects.toMatchObject({ status: 413 });
+    await expect(readJson(post("{}", { "content-length": String(10 * 2 ** 20) }))).rejects.toMatchObject({ status: 413 });
+  });
+
+  it("accepts a JSON object and nothing else", async () => {
+    await expect(readJson(post('{"a":1}'))).resolves.toEqual({ a: 1 });
+    await expect(readJson(post("[1]"))).rejects.toMatchObject({ status: 400 });
+    await expect(readJson(post("{"))).rejects.toMatchObject({ status: 400 });
   });
 });
 
@@ -63,17 +80,24 @@ describe("access checks", () => {
     expect(() => checkCode("test-code")).not.toThrow();
   });
 
-  it("enforces the per-visitor rate limit", () => {
+  it("enforces the per-visitor rate limit, counting a request as soon as it passes", () => {
     const ip = "10.0.0.1";
-    expect(() => checkAccess("test-code", ip, 12)).not.toThrow();
-    for (let i = 0; i < 12; i++) noteIp(ip);
+    const release = checkAccess("test-code", ip, 12);
     expect(submittedByIpSince(ip, Date.now() - 60_000)).toBe(12);
+    release();
     expect(() => checkAccess("test-code", ip, 1)).toThrow(/Rate limit/);
-    expect(() => checkAccess("test-code", "10.0.0.2", 1)).not.toThrow();
+    checkAccess("test-code", "10.0.0.2", 1)();
   });
 
-  it("enforces the daily cap", () => {
+  it("enforces the daily cap, including requests still being submitted", () => {
     expect(() => checkAccess("test-code", "10.0.0.3", 101)).toThrow(/Daily demo cap/);
+    // Parallel requests: each passes the check while the others' /run calls are in flight.
+    const before = submittedSince(0);
+    const releases = Array.from({ length: 8 }, (_, i) => checkAccess("test-code", `10.1.0.${i}`, 10));
+    expect(submittedSince(0)).toBe(before + 80);
+    expect(() => checkAccess("test-code", "10.1.1.1", 30)).toThrow(/Daily demo cap/);
+    releases.forEach((r) => r());
+    expect(submittedSince(0)).toBe(before);
   });
 });
 
@@ -122,9 +146,8 @@ describe("media library (in memory)", () => {
 describe("prices", () => {
   it("prices a request as execution time x the GPU's per-second rate", () => {
     const gpu = "NVIDIA RTX 6000 Ada Generation";
-    const hourly = pricePerHour(gpu)!;
-    expect(hourly).toBeGreaterThan(0);
-    expect(requestCost(gpu, 3_600_000)).toBeCloseTo(hourly, 6);
+    const hourly = requestCost(gpu, 3_600_000)!; // one GPU-hour
+    expect(hourly).toBe(1.75); // bench/prices.yaml, Runpod's list price
     expect(requestCost(gpu, 21_900)).toBeCloseTo((21.9 * hourly) / 3600, 8);
   });
 

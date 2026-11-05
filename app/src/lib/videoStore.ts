@@ -67,7 +67,6 @@ export function addVideoPending(id: string, input: AnimateInput, sourcePrompt?: 
 export const getVideoPending = (id: string) => store.pending.get(id);
 export const getVideoRecord = (id: string) => store.done.get(id);
 export const isVideoKnown = (id: string) => store.pending.has(id) || store.done.has(id);
-export const pendingVideoIds = () => [...store.pending.keys()];
 export const activeVideoCount = () => store.pending.size;
 
 /** In-flight jobs, newest first. */
@@ -91,8 +90,21 @@ export function failedVideosSince(ts: number): VideoJobView[] {
   return videoHistory().filter((r) => r.submittedAt >= ts && (r.status !== "COMPLETED" || !!r.error));
 }
 
+// Clips that passed checkVideoAccess but aren't recorded yet; see reserveImages in store.ts.
+let inFlight = 0;
+
+/** Holds one clip slot until the job is recorded with addVideoPending (or failed); returns release(). */
+export function reserveVideo(): () => void {
+  inFlight += 1;
+  let open = true;
+  return () => {
+    if (open) inFlight -= 1;
+    open = false;
+  };
+}
+
 export function videosSubmittedSince(ts: number): number {
-  let n = 0;
+  let n = inFlight;
   for (const p of store.pending.values()) if (p.submittedAt >= ts) n++;
   for (const r of store.done.values()) if (r.submittedAt >= ts) n++;
   return n;

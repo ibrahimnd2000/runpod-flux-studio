@@ -62,18 +62,22 @@ export function useSingleJob(onFinished: (job: JobView) => void) {
   const [problem, setProblem] = useState<Problem | null>(null);
   const [busy, setBusy] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // False after unmount, so a poll already in flight doesn't schedule another.
+  const alive = useRef(true);
 
-  useEffect(
-    () => () => {
+  useEffect(() => {
+    alive.current = true;
+    return () => {
+      alive.current = false;
       if (timer.current) clearTimeout(timer.current);
       setTitle(null);
-    },
-    [],
-  );
+    };
+  }, []);
 
   const poll = useCallback(
     async function poll(id: string, failures = 0) {
       const res = await getJson<JobView>(`/api/jobs/${id}`);
+      if (!alive.current) return;
       if (!res.ok) {
         if (isTransient(res.status) && failures < MAX_POLL_FAILURES) {
           setProblem({

@@ -41,7 +41,7 @@ export interface AnimateSource {
   url: string; // something <img> can show
 }
 
-/** Modal: animate a library image with the LTX-2.5 endpoint and play the result. */
+/** Modal: animate a library image with the selected video model and play the result. */
 export default function AnimateDialog({
   source,
   models,
@@ -64,6 +64,9 @@ export default function AnimateDialog({
   const [now, setNow] = useState(0);
   const [playing, setPlaying] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // False once the dialog closes: a poll already in flight must not schedule another
+  // (or toast "Clip ready" on top of the Library's own toast).
+  const alive = useRef(true);
   const toast = useToast();
 
   const running = !!job && !TERMINAL.includes(job.status);
@@ -81,16 +84,18 @@ export default function AnimateDialog({
     return () => clearInterval(t);
   }, [running]);
 
-  useEffect(
-    () => () => {
+  useEffect(() => {
+    alive.current = true;
+    return () => {
+      alive.current = false;
       if (timer.current) clearTimeout(timer.current);
-    },
-    [],
-  );
+    };
+  }, []);
 
   const poll = useCallback(
     async function poll(id: string, failures = 0) {
       const res = await getJson<VideoJobView>(`/api/videos/${id}`);
+      if (!alive.current) return;
       if (!res.ok) {
         if (isTransient(res.status) && failures < MAX_POLL_FAILURES) {
           setProblem({ tone: "warn", title: "Lost contact with the app server, still trying", detail: res.error });

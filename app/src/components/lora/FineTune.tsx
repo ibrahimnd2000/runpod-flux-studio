@@ -18,7 +18,8 @@ type Preset = keyof LorasView["presets"];
 const PRESET_LABEL: Record<Preset, string> = { quick: "Quick", standard: "Standard", strong: "Strong" };
 // Measured 4 Nov 2026 (one run, README): 800 steps at 512 px, rank 16, on an RTX 6000 Ada took
 // 641 s of training (0.80 s/step) + 24 s of download, encoding and upload = 665 s of GPU time, $0.323.
-// Queue time (a cold worker pulls a 30 GB image, ~5 min) isn't billed and isn't included.
+// Queue time isn't billed and isn't included: a first start pulls a 30 GB image (299 s measured
+// on the training endpoint, 690 s on a slow host for the image endpoint).
 const EST_S_PER_STEP = 0.8;
 const EST_OVERHEAD_S = 25;
 const EST_USD_PER_S = 0.323 / 665;
@@ -32,7 +33,7 @@ function trainingPhase(lora: LoraView): { badge: string; detail: string; onGpu: 
   const p = lora.progress;
   if (p) return { badge: "training", detail: `step ${p.step}/${p.total_steps}${p.loss !== undefined ? ` · loss ${p.loss.toFixed(3)}` : ""}`, onGpu: true };
   if (lora.jobStatus === "IN_PROGRESS") return { badge: "starting", detail: "on a GPU · loading FLUX and encoding the images…", onGpu: true };
-  return { badge: "waiting for GPU", detail: "waiting for a training GPU (the first start pulls a 30 GB image, ~10 min)…", onGpu: false };
+  return { badge: "waiting for GPU", detail: "waiting for a training GPU (a first start pulls a 30 GB image: 5-12 min)…", onGpu: false };
 }
 
 function StatusBadge({ lora }: { lora: LoraView }) {

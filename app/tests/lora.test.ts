@@ -36,6 +36,7 @@ const loraById = await import("@/app/api/loras/[id]/route");
 const loraFile = await import("@/app/api/loras/[id]/file/route");
 const generate = await import("@/app/api/generate/route");
 const { sanitizeInput } = await import("@/lib/limits");
+const { LORA_LIMITS } = await import("@/lib/loras");
 
 const JPEG = Buffer.from("jpeg-bytes").toString("base64");
 const imageIds = Array.from({ length: 5 }, (_, i) => `img-0000000${i}-e1`);
@@ -107,6 +108,37 @@ describe("the training lifecycle", () => {
     expect((await list()).loras.find((l) => l.id === lora.id)).toMatchObject({ status: "training", jobStatus: "IN_QUEUE" });
     fake.status = { status: "IN_PROGRESS", output: { step: 40, total_steps: 400, loss: 0.31 } };
     expect((await list()).loras.find((l) => l.id === lora.id)).toMatchObject({ jobStatus: "IN_PROGRESS", progress: { step: 40, total_steps: 400, loss: 0.31 } });
+    // A stream with no content-length: the token is checked before any of it is read,
+    // and a valid upload is still capped while it streams.
+    let pulled = 0;
+    const stream = (chunks: number) =>
+      new ReadableStream<Uint8Array>(
+        {
+          pull(c) {
+            if (pulled++ >= chunks) c.close();
+            else c.enqueue(new Uint8Array(1024));
+          },
+        },
+        { highWaterMark: 0 }, // pull only when the route actually reads
+      );
+    const putStream = (tok: string | null, body: ReadableStream<Uint8Array>) =>
+      loraFile.PUT(
+        new Request(`http://test/api/loras/${lora.id}/file`, {
+          method: "PUT",
+          headers: tok ? { "x-upload-token": tok } : {},
+          body,
+          duplex: "half",
+        } as RequestInit),
+        params(lora.id),
+      );
+    expect((await putStream(null, stream(1000))).status).toBe(403);
+    expect(pulled).toBe(0);
+    const limits = LORA_LIMITS as { maxBytes: number };
+    const max = limits.maxBytes;
+    limits.maxBytes = 4096;
+    expect((await putStream(token, stream(10))).status).toBe(413);
+    limits.maxBytes = max;
+
     expect((await put(lora.id, null, new Uint8Array([1]))).status).toBe(403);
     expect((await put(lora.id, "f".repeat(48), new Uint8Array([1]))).status).toBe(403);
     expect((await put(lora.id, token, new Uint8Array(0))).status).toBe(413);

@@ -84,9 +84,6 @@ export function saveMedia(item: MediaItem, base64: string): boolean {
   }
 }
 
-/** Kept for the image job route. */
-export const saveImage = (item: MediaItem, base64Jpeg: string) => saveMedia({ ...item, kind: "image" }, base64Jpeg);
-
 export function getMediaItem(id: string): MediaItem | undefined {
   return isValidId(id) ? media.items.get(id) : undefined;
 }

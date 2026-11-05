@@ -20,6 +20,8 @@ export const config = {
   perIpPer10Min: int("RATE_LIMIT_PER_10_MIN", 12),
   // Largest bulk run; every image in it counts against the limits above.
   bulkMax: int("BULK_MAX", 8),
+  // The image endpoint's max workers (Runpod setting): how many images can render at once.
+  imageMaxWorkers: int("IMAGE_MAX_WORKERS", 1),
   maxSide: int("MAX_SIDE", 1024),
   maxSteps: int("MAX_STEPS", 28),
   // Image-to-video endpoints, one per model family; none set = Animate is hidden.

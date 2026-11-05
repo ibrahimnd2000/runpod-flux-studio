@@ -18,6 +18,7 @@ export function useAgentsConfig() {
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
     let alive = true;
+    let retry: ReturnType<typeof setTimeout> | undefined;
     const load = async () => {
       const res = await getJson<AgentsConfigView>("/api/agents/config");
       if (!alive) return;
@@ -26,12 +27,13 @@ export function useAgentsConfig() {
         setError(null);
       } else {
         setError(res.error ?? "Couldn't load the configuration.");
-        setTimeout(load, 10_000);
+        retry = setTimeout(load, 10_000);
       }
     };
     load();
     return () => {
       alive = false;
+      clearTimeout(retry);
     };
   }, []);
   return { cfg, error };

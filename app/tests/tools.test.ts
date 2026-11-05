@@ -171,3 +171,27 @@ describe("run phase", () => {
     expect(getRun(run.view.id)?.phase).toBeUndefined();
   });
 });
+
+describe("budgets under parallel tool calls", () => {
+  it("reserves spend at check time, so two calls in one turn can't both use the same images", async () => {
+    const run = newRun({ maxImages: 4, maxUsd: 1 });
+    const [a, b] = await Promise.all([
+      executeTool(call("generate_images", { prompts: ["a red mug", "a blue mug", "a green mug"], quality: "draft" }), run, dry, false),
+      executeTool(call("generate_images", { prompts: ["a red cup", "a blue cup", "a green cup"], quality: "draft" }), run, dry, false),
+    ]);
+    expect([a.reply.isError, b.reply.isError].filter(Boolean)).toHaveLength(1);
+    expect(run.view.spend.images).toBe(3);
+  });
+
+  it("gives the reservation back when a call fails", async () => {
+    const run = newRun({ maxImages: 4 });
+    const o = await executeTool(
+      call("generate_images", { prompts: ["a red mug"] }),
+      run,
+      { ...dry, dryRun: false, code: "wrong" }, // rejected by the access check after the budget check
+      false,
+    );
+    expect(o.reply.isError).toBe(true);
+    expect(run.view.spend).toMatchObject({ images: 0, gpuUsd: 0 });
+  });
+});

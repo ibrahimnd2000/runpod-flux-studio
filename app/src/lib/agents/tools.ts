@@ -8,7 +8,7 @@ import { listMedia, readMedia } from "../media";
 import { endpointHealth } from "../runpod";
 import { animateImage, generateImages, MEASURED, videoAvailable, type GpuCtx } from "./gpu";
 import type { ToolCall, ToolReply, ToolSpec } from "./providers";
-import { addSpend, totalUsd, type RunState } from "./runs";
+import { reserveSpend, totalUsd, type RunState } from "./runs";
 
 // The tools an agent can call. Each one is a thin wrapper over the same code the
 // Studio uses, plus a budget check: a call that would push the run past its
@@ -34,7 +34,7 @@ export const imageCost = (s: { width: number; height: number; steps: number }) =
 
 const schemas = {
   generate_images: z.object({
-    prompts: z.array(z.string().min(3).max(800)).min(1).max(4).describe("1-4 FLUX prompts; each becomes one image, all rendered in parallel."),
+    prompts: z.array(z.string().min(3).max(800)).min(1).max(4).describe("1-4 FLUX prompts; each becomes one image (one GPU job)."),
     quality: z.enum(["draft", "final"]).default("final").describe("draft: 768², 16 steps, ~40% of the cost. final: 1024², 28 steps."),
     aspect: z.enum(["square", "landscape", "portrait"]).default("square"),
   }),
@@ -62,17 +62,20 @@ const schemas = {
 
 type ToolName = keyof typeof schemas;
 
+const VIDEO_MODEL_NAMES = { wan22: "Wan 2.2, silent", ltx2: "LTX-2.5, with audio" } as const;
+
 const DESCRIPTIONS: Record<ToolName, string> = {
   generate_images:
-    "Render images with FLUX.1-dev on the Runpod Serverless GPU endpoint. Each prompt is one GPU job; all run in parallel. " +
+    "Render images with FLUX.1-dev on the Runpod Serverless GPU endpoint. Each prompt is one GPU job; they run in parallel " +
+    `up to the endpoint's ${config.imageMaxWorkers} worker(s) and queue beyond that. ` +
     `About ${MEASURED.imageWarmS.toFixed(0)} s and $${MEASURED.imageUsd} per final-quality image on a warm worker; a cold start adds 30-90+ s. ` +
     "Returns library ids. Write prompts as concrete visual descriptions (subject, setting, light, composition, style).",
   animate_image:
-    "Turn one library image into a short silent video clip (Wan 2.2 image-to-video on a separate GPU endpoint). " +
+    `Turn one library image into a short video clip (${videoModels()[0] ? VIDEO_MODEL_NAMES[videoModels()[0]] : "no video model configured"}; image-to-video on a separate GPU endpoint). ` +
     `About $${MEASURED.videoUsdPerS} and ${MEASURED.videoExecSPerS.toFixed(0)} s of GPU time per second of video, plus any cold start.`,
   view_image: "Look at a library image to judge it before choosing or refining. Free.",
   search_library: "Find existing images in the media library by prompt text. Reusing one costs nothing. Free.",
-  check_endpoints: "Current state of the GPU endpoints: warm/idle workers and queue depth, to anticipate cold starts. Free.",
+  check_endpoints: "Current state of the GPU endpoints: warm, resumable and starting workers and queue depth, to anticipate cold starts. Free.",
   estimate_cost: "Estimate dollars and time for a plan before spending. Free.",
   finish: "Deliver the result and end the run: the media ids that answer the brief and a short summary. Call this exactly once, last.",
 };
@@ -150,10 +153,17 @@ const TOOLS: { [N in ToolName]: Impl<N> } = {
     if (est > left.usd + 1e-9)
       return fail(call, run, `Budget: this would cost ~$${est.toFixed(4)}, only $${left.usd.toFixed(4)} left. Try fewer images or draft quality.`);
 
-    const results = await generateImages(gpu, prompts, size);
+    const settle = reserveSpend(run, { gpuUsd: est, images: prompts.length });
+    let results: Awaited<ReturnType<typeof generateImages>>;
+    try {
+      results = await generateImages(gpu, prompts, size);
+    } catch (e) {
+      settle({});
+      throw e;
+    }
     const done = results.filter((r) => r.mediaId);
     const cost = results.reduce((a, r) => a + r.costUsd, 0);
-    addSpend(run, { gpuUsd: cost, images: done.length });
+    settle({ gpuUsd: cost, images: done.length });
     const images = results.map((r) =>
       r.mediaId
         ? { media_id: r.mediaId, prompt: r.prompt, seconds: r.executionMs ? +(r.executionMs / 1000).toFixed(1) : undefined, queue_s: r.delayMs ? +(r.delayMs / 1000).toFixed(1) : undefined, gpu: r.gpu, cost_usd: +r.costUsd.toFixed(4) }
@@ -173,8 +183,15 @@ const TOOLS: { [N in ToolName]: Impl<N> } = {
     const est = MEASURED.videoUsdPerS * seconds;
     if (left.videos < 1) return fail(call, run, "Video budget: no clips left for this run.");
     if (est > left.usd + 1e-9) return fail(call, run, `Budget: a ${seconds} s clip costs ~$${est.toFixed(3)}, only $${left.usd.toFixed(4)} left.`);
-    const r = await animateImage(gpu, media_id, motion, seconds);
-    addSpend(run, { gpuUsd: r.costUsd, videos: r.mediaId ? 1 : 0 });
+    const settle = reserveSpend(run, { gpuUsd: est, videos: 1 });
+    let r: Awaited<ReturnType<typeof animateImage>>;
+    try {
+      r = await animateImage(gpu, media_id, motion, seconds);
+    } catch (e) {
+      settle({});
+      throw e;
+    }
+    settle({ gpuUsd: r.costUsd, videos: r.mediaId ? 1 : 0 });
     if (!r.mediaId) return fail(call, run, r.error ?? "The video job failed.");
     return ok(
       call,
@@ -223,7 +240,14 @@ const TOOLS: { [N in ToolName]: Impl<N> } = {
           workers_starting: w.initializing ?? 0,
           jobs_queued: h.jobs?.inQueue ?? 0,
           jobs_running: h.jobs?.inProgress ?? 0,
-          expect: (w.idle ?? 0) + (w.running ?? 0) > 0 ? "warm: jobs start within seconds" : "cold: the first job waits for a worker (30-90+ s)",
+          // Runpod's "running" includes workers kept warm by their idle timeout; its "idle" ones are
+          // stopped (not billed) but cached, so they resume in about half a minute (FlashBoot).
+          expect:
+            (w.running ?? 0) > 0
+              ? "warm: jobs start within seconds"
+              : (w.idle ?? 0) > 0
+                ? "resumable: a cached worker resumes in ~35 s"
+                : "cold: the first job waits for a worker (90 s or more)",
         };
       } catch {
         return { configured: true, error: "status unavailable" };
@@ -242,7 +266,7 @@ const TOOLS: { [N in ToolName]: Impl<N> } = {
   async estimate_cost(call, run, _gpu, { images, quality, video_seconds }) {
     const per = imageCost(imageSize(quality, "square"));
     const usd = images * per + video_seconds * MEASURED.videoUsdPerS;
-    const parallel = Math.max(1, Math.min(images, 2)); // image endpoint runs up to 2 workers
+    const parallel = Math.max(1, Math.min(images, config.imageMaxWorkers));
     const warmS = Math.ceil(images / parallel) * MEASURED.imageWarmS * (quality === "draft" ? 0.45 : 1) + video_seconds * MEASURED.videoExecSPerS;
     return ok(
       call,

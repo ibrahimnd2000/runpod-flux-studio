@@ -1,7 +1,7 @@
 import { config } from "@/lib/config";
-import { checkAccess, clientIp, LimitError, readJson, sanitizeInput } from "@/lib/limits";
+import { checkAccess, checkCode, clientIp, LimitError, readJson, sanitizeInput } from "@/lib/limits";
 import { submitImage } from "@/lib/loras";
-import { addPending, noteIp } from "@/lib/store";
+import { addPending } from "@/lib/store";
 import type { GenerateInput } from "@/lib/types";
 
 // Bulk generation: one Runpod /run job per image, all submitted at once, so the
@@ -9,11 +9,15 @@ import type { GenerateInput } from "@/lib/types";
 // workers; the rest wait in Runpod's queue). The browser polls each job id.
 export async function POST(req: Request) {
   const ip = clientIp(req);
+  const code = req.headers.get("x-access-code");
+  let release = () => {};
   try {
+    checkCode(code); // before doing any work for the request
     const body = await readJson<Record<string, unknown>>(req);
-    const prompts = (Array.isArray(body.prompts) ? body.prompts : [])
-      .map((p) => (typeof p === "string" ? p.trim() : ""))
-      .filter(Boolean);
+    const raw = Array.isArray(body.prompts) ? body.prompts : [];
+    if (raw.length > config.bulkMax)
+      throw new LimitError(`A bulk run is limited to ${config.bulkMax} images (you sent ${raw.length} prompts).`, 400);
+    const prompts = raw.map((p) => (typeof p === "string" ? p.trim() : "")).filter(Boolean);
     const variations = Math.min(Math.max(Math.round(Number(body.variations) || 1), 1), config.bulkMax);
     if (!prompts.length) throw new LimitError("Add at least one prompt (one per line).", 400);
 
@@ -23,7 +27,7 @@ export async function POST(req: Request) {
     if (inputs.length > config.bulkMax)
       throw new LimitError(`A bulk run is limited to ${config.bulkMax} images (you asked for ${inputs.length}).`, 400);
 
-    checkAccess(req.headers.get("x-access-code"), ip, inputs.length);
+    release = checkAccess(code, ip, inputs.length);
 
     // Distinct seeds so variations of one prompt differ, but stay reproducible.
     const base = Math.floor(Math.random() * 2 ** 31);
@@ -33,7 +37,6 @@ export async function POST(req: Request) {
     const jobs = results.map((r, i) => {
       if (r.status === "fulfilled") {
         addPending(r.value.id, inputs[i], ip);
-        noteIp(ip);
         return { id: r.value.id, status: r.value.status, input: inputs[i] };
       }
       console.error("bulk submit failed", r.reason);
@@ -47,5 +50,7 @@ export async function POST(req: Request) {
     if (e instanceof LimitError) return Response.json({ error: e.message }, { status: e.status });
     console.error("bulk failed", e);
     return Response.json({ error: "Could not submit the bulk run." }, { status: 502 });
+  } finally {
+    release();
   }
 }

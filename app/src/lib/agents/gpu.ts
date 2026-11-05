@@ -8,7 +8,7 @@ import { checkAccess, checkVideoAccess, LimitError, sanitizeAnimate, sanitizeInp
 import { submitImage } from "../loras";
 import { getMediaItem, readMedia, saveMedia } from "../media";
 import { submitVideoJob } from "../runpod";
-import { addPending, noteIp } from "../store";
+import { addPending } from "../store";
 import { TERMINAL } from "../types";
 import { refreshVideoJob } from "../videoJobs";
 import { addVideoPending } from "../videoStore";
@@ -123,7 +123,7 @@ export async function generateImages(
     );
   }
 
-  checkAccess(ctx.code, ctx.ip, inputs.length);
+  const release = checkAccess(ctx.code, ctx.ip, inputs.length);
   const base = Math.floor(Math.random() * 2 ** 31);
   const statuses = inputs.map(() => "IN_QUEUE");
   const report = (i: number, status: string) => {
@@ -131,19 +131,30 @@ export async function generateImages(
     ctx.phase?.(imagePhase(statuses));
   };
   ctx.phase?.(imagePhase(statuses));
+  // Submit everything first and record it, which ends the cap reservation; then wait.
+  let ids: (string | null)[];
+  try {
+    ids = await Promise.all(
+      inputs.map(async (input, i) => {
+        input.seed = base + i;
+        try {
+          const id = (await submitImage(input)).id;
+          addPending(id, input, ctx.ip);
+          return id;
+        } catch (e) {
+          console.error("agent image submit failed", e);
+          report(i, "FAILED");
+          return null;
+        }
+      }),
+    );
+  } finally {
+    release();
+  }
   const results = await Promise.all(
     inputs.map(async (input, i): Promise<ImageResult> => {
-      input.seed = base + i;
-      let id: string;
-      try {
-        id = (await submitImage(input)).id;
-      } catch (e) {
-        console.error("agent image submit failed", e);
-        report(i, "FAILED");
-        return { prompt: input.prompt, costUsd: 0, error: "Could not submit the job to Runpod." };
-      }
-      addPending(id, input, ctx.ip);
-      noteIp(ctx.ip);
+      const id = ids[i];
+      if (!id) return { prompt: input.prompt, costUsd: 0, error: "Could not submit the job to Runpod." };
       const v = await waitFor(ctx, () => refreshImageJob(id), 2000, 20 * 60_000, (x) => report(i, x.status));
       if (!v || !TERMINAL.includes(v.status)) report(i, "TIMED_OUT");
       if (!v || v.status !== "COMPLETED")
@@ -182,19 +193,23 @@ export async function animateImage(ctx: GpuCtx, sourceId: string, motion: string
     return { mediaId: id, sourceId, model: "dry run", costUsd, executionMs: 0 };
   }
 
-  if (!videoAvailable()) throw new LimitError("Video generation isn't enabled on this deployment.", 503);
-  checkVideoAccess(ctx.code, ctx.ip);
   const input = sanitizeAnimate({ sourceId, prompt: motion, num_frames: frames, resolution: "540p", audio: false });
-  const file = readMedia(sourceId)!;
-  const job = await submitVideoJob(config.videoEndpoints[input.model!], {
-    image: `data:${file.mime};base64,${file.bytes.toString("base64")}`,
-    prompt: input.prompt,
-    resolution: input.resolution,
-    num_frames: input.num_frames,
-    audio: false,
-  });
-  addVideoPending(job.id, input, source.prompt);
-  noteIp(ctx.ip);
+  const file = readMedia(sourceId);
+  if (!file) throw new LimitError(`The image ${sourceId} is no longer in the library.`, 404);
+  const release = checkVideoAccess(ctx.code, ctx.ip); // also checks that video is enabled
+  let job: { id: string };
+  try {
+    job = await submitVideoJob(config.videoEndpoints[input.model!], {
+      image: `data:${file.mime};base64,${file.bytes.toString("base64")}`,
+      prompt: input.prompt,
+      resolution: input.resolution,
+      num_frames: input.num_frames,
+      audio: false,
+    });
+    addVideoPending(job.id, input, source.prompt);
+  } finally {
+    release();
+  }
   ctx.phase?.("Waiting for a video GPU (a cold start can take several minutes)…");
   const v = await waitFor(ctx, () => refreshVideoJob(job.id), 4000, 40 * 60_000, (x) =>
     ctx.phase?.(

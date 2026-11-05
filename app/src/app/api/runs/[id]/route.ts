@@ -11,7 +11,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   const { id } = await params;
   const run = getRun(id);
   if (!run) return Response.json({ error: "Unknown run." }, { status: 404 });
-  const after = Number(new URL(req.url).searchParams.get("after") ?? -1);
+  const after = Number(new URL(req.url).searchParams.get("after") ?? -1) || -1; // junk -> everything
   const ids = new Set([...(run.result?.mediaIds ?? []), ...run.events.flatMap((e) => ("mediaIds" in e ? (e.mediaIds ?? []) : []))]);
   const media: RunPollView["media"] = {};
   for (const m of ids) {
