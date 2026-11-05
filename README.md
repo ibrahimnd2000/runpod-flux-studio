@@ -9,6 +9,8 @@ own endpoint, and **pipelines, tool-calling agents and an agent battleground** t
 agents running on Claude or on an open model served from a **Runpod vLLM endpoint**.
 
 **Live demo:** https://t2jragqmgaorlq-3000.proxy.runpod.net (generating needs the access code sent with the submission)
+· **[Demo video](https://drive.google.com/file/d/18yx78E-hc42lz6DGaEZGBQyxXFhdwNJF/view?usp=sharing)** (4.5 min, captioned:
+the endpoint call, Studio, video, pipelines, a judged agent battle and LoRA fine-tuning)
 
 ![Studio: result with the request inspector (where the time went, GPU, cost) and the live endpoint card](docs/screenshots/studio.jpg)
 
